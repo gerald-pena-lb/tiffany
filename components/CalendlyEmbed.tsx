@@ -2,21 +2,22 @@
 
 interface CalendlyEmbedProps {
   url: string;
-  email?: string;
+  name?: string;
   onClose: () => void;
 }
 
-export default function CalendlyEmbed({ url, email, onClose }: CalendlyEmbedProps) {
-  const calendlyUrl = email
-    ? `${url}?email=${encodeURIComponent(email)}`
-    : url;
+export default function CalendlyEmbed({ url, name, onClose }: CalendlyEmbedProps) {
+  const params = new URLSearchParams();
+  if (name) params.set("name", name);
+
+  const calendlyUrl = params.toString() ? `${url}?${params.toString()}` : url;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
       <div className="relative w-full max-w-lg mx-4 bg-dark rounded-2xl border border-white/10 overflow-hidden shadow-2xl">
         <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
           <h3 className="text-sm font-medium text-gray-300">
-            Book Your Strategy Call
+            Book Your Call with Alinka
           </h3>
           <button
             onClick={onClose}
@@ -30,7 +31,7 @@ export default function CalendlyEmbed({ url, email, onClose }: CalendlyEmbedProp
         <iframe
           src={calendlyUrl}
           className="w-full h-[550px] border-0"
-          title="Book a strategy call"
+          title="Book a call with Alinka"
         />
       </div>
     </div>

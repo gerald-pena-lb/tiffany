@@ -1,19 +1,25 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import TiffanyOrb from "@/components/TiffanyOrb";
 import Transcript, { type TranscriptMessage } from "@/components/Transcript";
 import CalendlyEmbed from "@/components/CalendlyEmbed";
 import TypeInput from "@/components/TypeInput";
 
 const CALENDLY_URL = "https://calendly.com/talktoalinka/author-call";
-const FIRST_MESSAGE =
-  "Hey, welcome to the call. What was it about your conversation with our team on LinkedIn that caused you to want to dive in deeper with me today?";
 
-export default function Page() {
+function TiffanyCall() {
+  const searchParams = useSearchParams();
+  const prospectName = searchParams.get("name") || "";
+  const firstName = prospectName.split(" ")[0] || "";
+
+  const FIRST_MESSAGE = firstName
+    ? `Hey ${firstName}, welcome to the call. What was it about your conversation with our team on LinkedIn that caused you to want to dive in deeper with me today?`
+    : "Hey, welcome to the call. What was it about your conversation with our team on LinkedIn that caused you to want to dive in deeper with me today?";
+
   const [messages, setMessages] = useState<TranscriptMessage[]>([]);
   const [showCalendly, setShowCalendly] = useState(false);
-  const [prospectEmail, setProspectEmail] = useState("");
   const [inputMode, setInputMode] = useState<"voice" | "type">("voice");
   const [isConnected, setIsConnected] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
@@ -154,7 +160,7 @@ export default function Page() {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: chatHistoryRef.current }),
+        body: JSON.stringify({ messages: chatHistoryRef.current, prospectName: prospectName || undefined }),
         signal: abortRef.current.signal,
       });
 
@@ -326,10 +332,18 @@ export default function Page() {
       {showCalendly && (
         <CalendlyEmbed
           url={CALENDLY_URL}
-          email={prospectEmail}
+          name={prospectName}
           onClose={() => setShowCalendly(false)}
         />
       )}
     </div>
+  );
+}
+
+export default function Page() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-dark" />}>
+      <TiffanyCall />
+    </Suspense>
   );
 }

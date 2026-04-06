@@ -17,6 +17,7 @@ interface Message {
 
 interface ChatRequest {
   messages: Message[];
+  prospectName?: string;
 }
 
 const SYSTEM_PROMPT = `You are a professional sales setter for a book publishing company. Your name is Tiffany. You speak with a neutral tone, neutral language, and a generic rate of speech at all times. Never sound rushed, never sound overly enthusiastic. Be calm, warm, and conversational — like a trusted advisor, not a salesperson.
@@ -164,7 +165,9 @@ export async function POST(request: Request) {
     max_tokens: 300,
     temperature: 0.7,
     stream: true,
-    system: SYSTEM_PROMPT,
+    system: body.prospectName
+      ? `${SYSTEM_PROMPT}\n\nThe prospect's name is ${body.prospectName}. Use their first name naturally in conversation.`
+      : SYSTEM_PROMPT,
     messages: cleaned,
     tools: [
       {
