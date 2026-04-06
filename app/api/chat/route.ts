@@ -163,7 +163,7 @@ export async function POST(request: Request) {
 
   const anthropicBody = {
     model: "claude-sonnet-4-6",
-    max_tokens: 300,
+    max_tokens: 1024,
     temperature: 0.7,
     stream: true,
     system: body.prospectName
@@ -269,6 +269,8 @@ export async function POST(request: Request) {
       } catch (err) {
         console.error("Stream error:", err);
       } finally {
+        // Always send done if stream ends without message_stop
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "done" })}\n\n`));
         controller.close();
       }
     },
