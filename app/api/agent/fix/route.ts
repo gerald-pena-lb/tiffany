@@ -14,10 +14,9 @@ export async function GET() {
     conversation_config: {
       agent: {
         prompt: {
-          llm: "custom-llm/claude-opus-4-6",
+          llm: "custom-llm",
           custom_llm: {
             url: llmUrl || "",
-            model: "claude-opus-4-6",
           },
         },
       },
