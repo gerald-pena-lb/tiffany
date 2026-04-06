@@ -3,9 +3,7 @@
 import { useState, useRef, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import TiffanyOrb from "@/components/TiffanyOrb";
-import Transcript, { type TranscriptMessage } from "@/components/Transcript";
 import CalendlyEmbed from "@/components/CalendlyEmbed";
-import TypeInput from "@/components/TypeInput";
 
 const CALENDLY_URL = "https://calendly.com/talktoalinka/author-call";
 
@@ -18,19 +16,16 @@ function TiffanyCall() {
     ? `Hey ${firstName}, welcome to the call. What was it about your conversation with our team on LinkedIn that caused you to want to dive in deeper with me today?`
     : "Hey, welcome to the call. What was it about your conversation with our team on LinkedIn that caused you to want to dive in deeper with me today?";
 
-  const [messages, setMessages] = useState<TranscriptMessage[]>([]);
   const [showCalendly, setShowCalendly] = useState(false);
-  const [inputMode, setInputMode] = useState<"voice" | "type">("voice");
   const [isConnected, setIsConnected] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isListening, setIsListening] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [interimText, setInterimText] = useState("");
 
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const chatHistoryRef = useRef<{ role: "user" | "assistant"; content: string }[]>([]);
+  const processingRef = useRef(false);
 
   useEffect(() => {
     return () => {
@@ -39,14 +34,9 @@ function TiffanyCall() {
     };
   }, []);
 
-  // --- Core functions (no useCallback to avoid circular deps) ---
-
   function startListening() {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      console.error("Speech recognition not supported in this browser");
-      return;
-    }
+    if (!SpeechRecognition) return;
 
     recognitionRef.current?.stop();
 
@@ -59,19 +49,12 @@ function TiffanyCall() {
     let silenceTimer: ReturnType<typeof setTimeout> | null = null;
 
     recognition.onresult = (event: SpeechRecognitionEvent) => {
-      let interim = "";
       finalTranscript = "";
-
       for (let i = 0; i < event.results.length; i++) {
-        const result = event.results[i];
-        if (result.isFinal) {
-          finalTranscript += result[0].transcript;
-        } else {
-          interim += result[0].transcript;
+        if (event.results[i].isFinal) {
+          finalTranscript += event.results[i][0].transcript;
         }
       }
-
-      setInterimText(interim || finalTranscript);
 
       if (silenceTimer) clearTimeout(silenceTimer);
       if (finalTranscript.trim()) {
@@ -82,17 +65,8 @@ function TiffanyCall() {
       }
     };
 
-    recognition.onend = () => {
-      setIsListening(false);
-      if (silenceTimer) clearTimeout(silenceTimer);
-    };
-
-    recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
-      if (event.error !== "aborted" && event.error !== "no-speech") {
-        console.error("Speech recognition error:", event.error);
-      }
-      setIsListening(false);
-    };
+    recognition.onend = () => setIsListening(false);
+    recognition.onerror = () => setIsListening(false);
 
     recognition.start();
     recognitionRef.current = recognition;
@@ -109,8 +83,6 @@ function TiffanyCall() {
       });
 
       if (!res.ok) {
-        const errData = await res.text();
-        console.error("TTS error:", res.status, errData);
         setIsSpeaking(false);
         return;
       }
@@ -136,21 +108,16 @@ function TiffanyCall() {
           resolve();
         });
       });
-    } catch (err) {
-      console.error("TTS playback error:", err);
+    } catch {
       setIsSpeaking(false);
     }
   }
 
   async function sendMessage(text: string) {
-    if (!text.trim()) return;
+    if (!text.trim() || processingRef.current) return;
+    processingRef.current = true;
 
-    const userMsg = { role: "user" as const, content: text.trim() };
-    chatHistoryRef.current = [...chatHistoryRef.current, userMsg];
-    setMessages((prev) => [...prev, { role: "user", message: text.trim() }]);
-    setIsProcessing(true);
-    setInterimText("");
-
+    chatHistoryRef.current = [...chatHistoryRef.current, { role: "user", content: text.trim() }];
     recognitionRef.current?.stop();
     setIsListening(false);
 
@@ -165,8 +132,7 @@ function TiffanyCall() {
       });
 
       if (!res.ok) {
-        console.error("Chat API error:", res.status);
-        setIsProcessing(false);
+        processingRef.current = false;
         startListening();
         return;
       }
@@ -208,8 +174,6 @@ function TiffanyCall() {
           ...chatHistoryRef.current,
           { role: "assistant", content: fullResponse },
         ];
-        setMessages((prev) => [...prev, { role: "ai", message: fullResponse }]);
-
         await playTTS(fullResponse);
       }
     } catch (err) {
@@ -217,22 +181,15 @@ function TiffanyCall() {
         console.error("Message error:", err);
       }
     } finally {
-      setIsProcessing(false);
+      processingRef.current = false;
       startListening();
     }
   }
-
-  // --- Event handlers ---
 
   async function handleStart() {
     try {
       await navigator.mediaDevices.getUserMedia({ audio: true });
       setIsConnected(true);
-      setMessages([]);
-      chatHistoryRef.current = [];
-
-      // First message
-      setMessages([{ role: "ai", message: FIRST_MESSAGE }]);
       chatHistoryRef.current = [{ role: "assistant", content: FIRST_MESSAGE }];
 
       await playTTS(FIRST_MESSAGE);
@@ -252,83 +209,33 @@ function TiffanyCall() {
     setIsConnected(false);
     setIsSpeaking(false);
     setIsListening(false);
-    setIsProcessing(false);
-    setMessages([]);
+    processingRef.current = false;
     chatHistoryRef.current = [];
-    setInterimText("");
   }
-
-  function handleTypeSend(text: string) {
-    if (isConnected) sendMessage(text);
-  }
-
-  const statusText = !isConnected
-    ? "Click the mic to start your consultation"
-    : isSpeaking
-    ? "Tiffany is speaking..."
-    : isProcessing
-    ? "Thinking..."
-    : isListening
-    ? "Listening..."
-    : "Ready";
 
   return (
-    <div className="min-h-screen bg-dark flex flex-col items-center justify-center px-4 py-8">
-      <div className="w-full max-w-md flex flex-col items-center gap-8">
+    <div className="min-h-screen bg-black flex flex-col items-center justify-center">
+      {/* Sphere — the entire UI */}
+      <div
+        className={`cursor-pointer ${!isConnected ? "hover:scale-105 transition-transform" : ""}`}
+        onClick={!isConnected ? handleStart : undefined}
+      >
         <TiffanyOrb isSpeaking={isSpeaking} isConnected={isConnected} />
-
-        <div className="text-center">
-          <p className="text-gray-400 text-sm">{statusText}</p>
-          {interimText && isListening && (
-            <p className="text-gray-500 text-xs mt-2 italic">
-              &ldquo;{interimText}&rdquo;
-            </p>
-          )}
-        </div>
-
-        <div className="flex items-center gap-4">
-          {!isConnected ? (
-            <button
-              onClick={handleStart}
-              className="w-16 h-16 rounded-full bg-accent hover:bg-accent-light transition-colors flex items-center justify-center shadow-lg shadow-accent/25"
-            >
-              <svg className="w-7 h-7 text-white" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-1-9c0-.55.45-1 1-1s1 .45 1 1v6c0 .55-.45 1-1 1s-1-.45-1-1V5z" />
-                <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" />
-              </svg>
-            </button>
-          ) : (
-            <button
-              onClick={handleEnd}
-              className="w-16 h-16 rounded-full bg-red-500/80 hover:bg-red-500 transition-colors flex items-center justify-center shadow-lg shadow-red-500/25"
-            >
-              <svg className="w-7 h-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          )}
-
-          {isConnected && (
-            <button
-              onClick={() => setInputMode((m) => (m === "voice" ? "type" : "voice"))}
-              className="px-4 py-2 rounded-xl border border-white/10 text-gray-400 text-sm hover:text-white hover:border-white/20 transition-colors"
-            >
-              {inputMode === "voice" ? "Switch to Type" : "Switch to Voice"}
-            </button>
-          )}
-        </div>
-
-        {isConnected && inputMode === "type" && (
-          <div className="w-full">
-            <TypeInput onSend={handleTypeSend} disabled={isProcessing} />
-          </div>
-        )}
-
-        <div className="w-full">
-          <Transcript messages={messages} />
-        </div>
       </div>
 
+      {/* Minimal end button — only when connected */}
+      {isConnected && (
+        <button
+          onClick={handleEnd}
+          className="mt-8 w-10 h-10 rounded-full border border-gold/20 flex items-center justify-center text-gold/40 hover:text-gold hover:border-gold/50 transition-colors"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      )}
+
+      {/* Calendly overlay */}
       {showCalendly && (
         <CalendlyEmbed
           url={CALENDLY_URL}
@@ -338,7 +245,6 @@ function TiffanyCall() {
             const closeMsg = firstName
               ? `You're all set, ${firstName}. Before that call, remember — I'll send you our latest book with case studies and results from clients we've worked with. Set aside 30 minutes to go through it so your conversation with Alinka is as productive as possible. And if you can, send Alinka a few notes about your story ahead of time so she can get familiar before you connect. It was great talking with you.`
               : "You're all set. Before that call, remember — I'll send you our latest book with case studies and results from clients we've worked with. Set aside 30 minutes to go through it so your conversation with Alinka is as productive as possible. And if you can, send Alinka a few notes about your story ahead of time so she can get familiar before you connect. It was great talking with you.";
-            setMessages((prev) => [...prev, { role: "ai", message: closeMsg }]);
             chatHistoryRef.current = [
               ...chatHistoryRef.current,
               { role: "assistant", content: closeMsg },
@@ -354,7 +260,7 @@ function TiffanyCall() {
 
 export default function Page() {
   return (
-    <Suspense fallback={<div className="min-h-screen bg-dark" />}>
+    <Suspense fallback={<div className="min-h-screen bg-black" />}>
       <TiffanyCall />
     </Suspense>
   );

@@ -8,10 +8,11 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        dark: "#0f0f1a",
-        accent: {
-          DEFAULT: "#6366f1",
-          light: "#8b5cf6",
+        dark: "#000000",
+        gold: {
+          DEFAULT: "#d4af37",
+          light: "#ffd700",
+          dim: "#8b7520",
         },
       },
     },

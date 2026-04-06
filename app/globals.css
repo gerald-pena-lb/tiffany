@@ -3,57 +3,58 @@
 @tailwind utilities;
 
 body {
-  background-color: #0f0f1a;
+  background-color: #000000;
 }
 
-/* Orb pulse glow */
-@keyframes pulse-glow {
+/* Gold pulse glow */
+@keyframes pulse-gold {
   0%, 100% {
-    box-shadow: 0 0 60px rgba(99, 102, 241, 0.6);
+    box-shadow: 0 0 80px rgba(212,175,55,0.5), 0 0 40px rgba(212,175,55,0.3), inset 0 0 40px rgba(212,175,55,0.2);
     transform: scale(1);
   }
   50% {
-    box-shadow: 0 0 80px rgba(139, 92, 246, 0.8);
+    box-shadow: 0 0 100px rgba(255,215,0,0.6), 0 0 60px rgba(212,175,55,0.4), inset 0 0 50px rgba(212,175,55,0.3);
     transform: scale(1.03);
   }
 }
 
-.animate-pulse-glow {
-  animation: pulse-glow 2s ease-in-out infinite;
+.animate-pulse-gold {
+  animation: pulse-gold 2s ease-in-out infinite;
+}
+
+/* Slow orbital spin */
+@keyframes spin-slow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.animate-spin-slow {
+  animation: spin-slow 20s linear infinite;
+}
+
+@keyframes spin-reverse {
+  from { transform: rotateX(60deg) rotate(0deg); }
+  to { transform: rotateX(60deg) rotate(-360deg); }
+}
+
+.animate-spin-reverse {
+  animation: spin-reverse 15s linear infinite;
 }
 
 /* Wave ring animations */
 @keyframes wave-expand-1 {
-  0% {
-    transform: scale(1);
-    opacity: 0.4;
-  }
-  100% {
-    transform: scale(1.5);
-    opacity: 0;
-  }
+  0% { transform: scale(1); opacity: 0.4; }
+  100% { transform: scale(1.8); opacity: 0; }
 }
 
 @keyframes wave-expand-2 {
-  0% {
-    transform: scale(1);
-    opacity: 0.3;
-  }
-  100% {
-    transform: scale(1.6);
-    opacity: 0;
-  }
+  0% { transform: scale(1); opacity: 0.3; }
+  100% { transform: scale(2.0); opacity: 0; }
 }
 
 @keyframes wave-expand-3 {
-  0% {
-    transform: scale(1);
-    opacity: 0.2;
-  }
-  100% {
-    transform: scale(1.7);
-    opacity: 0;
-  }
+  0% { transform: scale(1); opacity: 0.2; }
+  100% { transform: scale(2.2); opacity: 0; }
 }
 
 .animate-wave-1 {
@@ -61,27 +62,9 @@ body {
 }
 
 .animate-wave-2 {
-  animation: wave-expand-2 2.5s ease-out infinite 0.3s;
+  animation: wave-expand-2 2.5s ease-out infinite 0.4s;
 }
 
 .animate-wave-3 {
-  animation: wave-expand-3 3s ease-out infinite 0.6s;
-}
-
-/* Custom scrollbar */
-.scrollbar-thin::-webkit-scrollbar {
-  width: 4px;
-}
-
-.scrollbar-thin::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.scrollbar-thin::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
-  border-radius: 2px;
-}
-
-.scrollbar-thin::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.2);
+  animation: wave-expand-3 3s ease-out infinite 0.8s;
 }
