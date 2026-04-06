@@ -74,6 +74,9 @@ function TiffanyCall() {
   }
 
   function startListening() {
+    // Don't restart if already listening
+    if (recognitionRef.current) return;
+
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) return;
 
@@ -117,12 +120,14 @@ function TiffanyCall() {
     };
 
     recognition.onend = () => {
+      recognitionRef.current = null;
       setIsListening(false);
       if (!didSendMessage && !processingRef.current) {
         setTimeout(() => startListening(), 300);
       }
     };
     recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
+      recognitionRef.current = null;
       setIsListening(false);
       if (event.error === "no-speech" || event.error === "aborted") {
         if (!processingRef.current) {
@@ -207,6 +212,7 @@ function TiffanyCall() {
     chatHistoryRef.current = [...chatHistoryRef.current, { role: "user", content: text.trim() }];
     setMessages((prev) => [...prev, { role: "user", message: text.trim() }]);
     recognitionRef.current?.stop();
+    recognitionRef.current = null;
     setIsListening(false);
 
     try {
