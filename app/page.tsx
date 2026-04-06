@@ -12,13 +12,11 @@ function TiffanyCall() {
   const prospectName = searchParams.get("name") || "";
   const firstName = prospectName.split(" ")[0] || "";
 
-  // Parse agent code: find any keyless numeric param (e.g. &123)
+  // Parse agent code: find any numeric key in the URL params (e.g. &123)
   const agentCode = (() => {
-    const params = searchParams.toString();
-    const parts = params.split("&");
-    for (const part of parts) {
-      const clean = part.split("=")[0];
-      if (/^\d+$/.test(clean) && !part.includes("=")) return clean;
+    const keys = Array.from(searchParams.keys());
+    for (const key of keys) {
+      if (/^\d+$/.test(key)) return key;
     }
     return "";
   })();
