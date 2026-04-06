@@ -19,15 +19,11 @@ export default function Transcript({ messages }: TranscriptProps) {
   }, [messages]);
 
   if (messages.length === 0) {
-    return (
-      <div className="text-gray-500 text-sm text-center py-4">
-        Conversation will appear here...
-      </div>
-    );
+    return null;
   }
 
   return (
-    <div className="flex flex-col gap-3 overflow-y-auto max-h-80 px-2 py-3 scrollbar-thin">
+    <div className="flex flex-col gap-3 overflow-y-auto max-h-80 px-2 py-3">
       {messages.map((msg, i) => (
         <div
           key={i}
@@ -35,14 +31,14 @@ export default function Transcript({ messages }: TranscriptProps) {
             msg.role === "user" ? "items-end" : "items-start"
           }`}
         >
-          <span className="text-xs text-gray-500 mb-1">
+          <span className="text-xs text-gray-400 mb-1">
             {msg.role === "ai" ? "Tiffany" : "You"}
           </span>
           <div
             className={`rounded-2xl px-4 py-2 max-w-[85%] text-sm leading-relaxed ${
               msg.role === "user"
-                ? "bg-accent/20 text-gray-200"
-                : "bg-white/10 text-gray-200"
+                ? "bg-gold/10 text-gray-700 border border-gold/20"
+                : "bg-gray-100 text-gray-700"
             }`}
           >
             {msg.message}
