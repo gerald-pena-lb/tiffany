@@ -113,7 +113,7 @@ function TiffanyCall() {
           didSendMessage = true;
           recognition.stop();
           sendMessage(finalTranscript);
-        }, 800);
+        }, 1100);
       }
     };
 
