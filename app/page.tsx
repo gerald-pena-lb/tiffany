@@ -270,12 +270,14 @@ function TiffanyCall() {
 
       if (fullResponse) {
         // Strip [STAGE:N] tag before TTS and history
-        const cleanResponse = fullResponse.replace(/\s*\[STAGE:\d\]\s*/g, "");
-        chatHistoryRef.current = [
-          ...chatHistoryRef.current,
-          { role: "assistant", content: cleanResponse },
-        ];
-        await playTTS(cleanResponse);
+        const cleanResponse = fullResponse.replace(/\s*\[STAGE:\d\]\s*/g, "").trim();
+        if (cleanResponse) {
+          chatHistoryRef.current = [
+            ...chatHistoryRef.current,
+            { role: "assistant", content: cleanResponse },
+          ];
+          await playTTS(cleanResponse);
+        }
       }
     } catch (err) {
       if ((err as Error).name !== "AbortError") {
@@ -283,10 +285,7 @@ function TiffanyCall() {
       }
     } finally {
       processingRef.current = false;
-      // If not already listening (e.g. after TTS), start now
-      if (!recognitionRef.current || recognitionRef.current === null) {
-        startListening();
-      }
+      startListening();
     }
   }
 
