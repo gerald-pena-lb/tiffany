@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { useConversation } from "@elevenlabs/react";
+import { ConversationProvider, useConversation } from "@elevenlabs/react";
 import TiffanyOrb from "@/components/TiffanyOrb";
 import Transcript, { type TranscriptMessage } from "@/components/Transcript";
 import CalendlyEmbed from "@/components/CalendlyEmbed";
@@ -10,7 +10,7 @@ import TypeInput from "@/components/TypeInput";
 const AGENT_ID = process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID || "";
 const CALENDLY_URL = "https://calendly.com/talktoalinka/author-call";
 
-export default function Page() {
+function TiffanyApp() {
   const [messages, setMessages] = useState<TranscriptMessage[]>([]);
   const [showCalendly, setShowCalendly] = useState(false);
   const [prospectEmail, setProspectEmail] = useState("");
@@ -19,10 +19,12 @@ export default function Page() {
   const conversation = useConversation({
     onConnect: () => console.log("Connected to Tiffany"),
     onDisconnect: () => console.log("Disconnected from Tiffany"),
-    onError: (message) => console.error("Conversation error:", message),
+    onError: (message, context) =>
+      console.error("Conversation error:", message, context),
+    onDebug: (info) => console.log("ElevenLabs debug:", info),
     onMessage: (payload) => {
       setMessages((prev) => {
-        const role = payload.source === "user" ? "user" : "ai";
+        const role = payload.role === "user" ? "user" : "ai";
         const last = prev[prev.length - 1];
         if (last && last.role === role && last.message === payload.message) {
           return prev;
@@ -45,17 +47,16 @@ export default function Page() {
   const handleStart = useCallback(async () => {
     try {
       await navigator.mediaDevices.getUserMedia({ audio: true });
-      await conversation.startSession({
+      conversation.startSession({
         agentId: AGENT_ID,
-        connectionType: "webrtc",
       });
     } catch (err) {
       console.error("Failed to start:", err);
     }
   }, [conversation]);
 
-  const handleEnd = useCallback(async () => {
-    await conversation.endSession();
+  const handleEnd = useCallback(() => {
+    conversation.endSession();
     setMessages([]);
   }, [conversation]);
 
@@ -95,7 +96,11 @@ export default function Page() {
               disabled={conversation.status === "connecting"}
               className="w-16 h-16 rounded-full bg-accent hover:bg-accent-light transition-colors flex items-center justify-center shadow-lg shadow-accent/25 disabled:opacity-50"
             >
-              <svg className="w-7 h-7 text-white" fill="currentColor" viewBox="0 0 24 24">
+              <svg
+                className="w-7 h-7 text-white"
+                fill="currentColor"
+                viewBox="0 0 24 24"
+              >
                 <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-1-9c0-.55.45-1 1-1s1 .45 1 1v6c0 .55-.45 1-1 1s-1-.45-1-1V5z" />
                 <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" />
               </svg>
@@ -105,8 +110,18 @@ export default function Page() {
               onClick={handleEnd}
               className="w-16 h-16 rounded-full bg-red-500/80 hover:bg-red-500 transition-colors flex items-center justify-center shadow-lg shadow-red-500/25"
             >
-              <svg className="w-7 h-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              <svg
+                className="w-7 h-7 text-white"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M6 18L18 6M6 6l12 12"
+                />
               </svg>
             </button>
           )}
@@ -114,7 +129,9 @@ export default function Page() {
           {/* Voice / Type toggle */}
           {isConnected && (
             <button
-              onClick={() => setInputMode((m) => (m === "voice" ? "type" : "voice"))}
+              onClick={() =>
+                setInputMode((m) => (m === "voice" ? "type" : "voice"))
+              }
               className="px-4 py-2 rounded-xl border border-white/10 text-gray-400 text-sm hover:text-white hover:border-white/20 transition-colors"
             >
               {inputMode === "voice" ? "Switch to Type" : "Switch to Voice"}
@@ -144,5 +161,13 @@ export default function Page() {
         />
       )}
     </div>
+  );
+}
+
+export default function Page() {
+  return (
+    <ConversationProvider>
+      <TiffanyApp />
+    </ConversationProvider>
   );
 }
