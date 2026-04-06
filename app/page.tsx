@@ -177,18 +177,21 @@ function TiffanyCall() {
 
         const audio = new Audio(audioUrl);
         audioRef.current = audio;
-        audio.onended = () => {
+
+        const cleanup = () => {
           setIsSpeaking(false);
           URL.revokeObjectURL(audioUrl);
           audioRef.current = null;
           resolve();
         };
-        audio.onerror = () => {
-          setIsSpeaking(false);
-          URL.revokeObjectURL(audioUrl);
-          audioRef.current = null;
-          resolve();
+
+        audio.onended = cleanup;
+        audio.onerror = cleanup;
+        // pause() doesn't fire onended — this catches interrupts
+        audio.onpause = () => {
+          if (interruptedRef.current) cleanup();
         };
+
         audio.play().catch(() => {
           setIsSpeaking(false);
           resolve();
