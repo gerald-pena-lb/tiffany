@@ -78,6 +78,8 @@ function TiffanyCall() {
     let silenceTimer: ReturnType<typeof setTimeout> | null = null;
     let hasInterrupted = false;
 
+    let didSendMessage = false;
+
     recognition.onresult = (event: SpeechRecognitionEvent) => {
       let interim = "";
       finalTranscript = "";
@@ -99,14 +101,29 @@ function TiffanyCall() {
       if (silenceTimer) clearTimeout(silenceTimer);
       if (finalTranscript.trim()) {
         silenceTimer = setTimeout(() => {
+          didSendMessage = true;
           recognition.stop();
           sendMessage(finalTranscript);
         }, 1500);
       }
     };
 
-    recognition.onend = () => setIsListening(false);
-    recognition.onerror = () => setIsListening(false);
+    recognition.onend = () => {
+      setIsListening(false);
+      // Auto-restart if we didn't send a message (speech recognition timed out)
+      if (!didSendMessage && !processingRef.current) {
+        setTimeout(() => startListening(), 300);
+      }
+    };
+    recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
+      setIsListening(false);
+      // Auto-restart on recoverable errors
+      if (event.error === "no-speech" || event.error === "aborted") {
+        if (!processingRef.current) {
+          setTimeout(() => startListening(), 300);
+        }
+      }
+    };
 
     recognition.start();
     recognitionRef.current = recognition;
