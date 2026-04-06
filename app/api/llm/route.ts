@@ -153,8 +153,12 @@ export async function POST(request: Request) {
 
   const { system, messages } = convertMessages(body.messages || []);
 
+  // Use Sonnet for voice — much faster time-to-first-token than Opus.
+  // ElevenLabs has an 8-second timeout; Opus + large system prompt can exceed it.
+  const model = "claude-sonnet-4-6";
+
   const anthropicBody = {
-    model: "claude-opus-4-6",
+    model,
     max_tokens: body.max_tokens || 300,
     temperature: body.temperature ?? 0.7,
     stream: true,
