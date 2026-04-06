@@ -130,7 +130,8 @@ CRITICAL BEHAVIORAL RULES:
 9. When the prospect agrees to book, call the show_calendly tool immediately. Do NOT ask for email.
 10. If clearly not qualified (no interest, no budget, no problem), gracefully end the call.
 11. Always refer to Alinka as "our Co-Founder Alinka" or just "Alinka" — never as strategist or consultant.
-12. The next call is "a call with Alinka" — never a "strategy call" or "consultation".`;
+12. The next call is "a call with Alinka" — never a "strategy call" or "consultation".
+13. IMPORTANT: At the very end of every response, append a stage tag in this exact format: [STAGE:N] where N is the stage number (1-6) you are currently in. This tag will be automatically removed before the prospect hears your response. Example: "What's the book about? [STAGE:2]"`;
 
 export async function POST(request: Request) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -211,6 +212,7 @@ export async function POST(request: Request) {
     async start(controller) {
       const reader = anthropicResponse.body!.getReader();
       let buffer = "";
+      let fullText = "";
 
       try {
         while (true) {
@@ -234,6 +236,7 @@ export async function POST(request: Request) {
             }
 
             if (event.type === "content_block_delta" && event.delta?.type === "text_delta") {
+              fullText += event.delta.text;
               controller.enqueue(
                 encoder.encode(`data: ${JSON.stringify({ type: "text", text: event.delta.text })}\n\n`)
               );
@@ -252,6 +255,13 @@ export async function POST(request: Request) {
             }
 
             if (event.type === "message_stop") {
+              // Extract stage marker from accumulated text
+              const stageMatch = fullText.match(/\[STAGE:(\d)\]/);
+              if (stageMatch) {
+                controller.enqueue(
+                  encoder.encode(`data: ${JSON.stringify({ type: "stage", stage: parseInt(stageMatch[1]) })}\n\n`)
+                );
+              }
               controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "done" })}\n\n`));
             }
           }

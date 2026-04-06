@@ -12,6 +12,17 @@ function TiffanyCall() {
   const prospectName = searchParams.get("name") || "";
   const firstName = prospectName.split(" ")[0] || "";
 
+  // Parse agent code: find any keyless numeric param (e.g. &123)
+  const agentCode = (() => {
+    const params = searchParams.toString();
+    const parts = params.split("&");
+    for (const part of parts) {
+      const clean = part.split("=")[0];
+      if (/^\d+$/.test(clean) && !part.includes("=")) return clean;
+    }
+    return "";
+  })();
+
   const FIRST_MESSAGE = firstName
     ? `Hey ${firstName}, welcome to the call. What was it about your conversation with our team on LinkedIn that caused you to want to dive in deeper with me today?`
     : "Hey, welcome to the call. What was it about your conversation with our team on LinkedIn that caused you to want to dive in deeper with me today?";
@@ -25,6 +36,7 @@ function TiffanyCall() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const chatHistoryRef = useRef<{ role: "user" | "assistant"; content: string }[]>([]);
+  const conversationIdRef = useRef<string | null>(null);
   const processingRef = useRef(false);
   const interruptedRef = useRef(false);
 
@@ -215,6 +227,13 @@ function TiffanyCall() {
             if (event.type === "text") fullResponse += event.text;
             else if (event.type === "tool_start") toolName = event.name;
             else if (event.type === "tool_delta") toolJson += event.json;
+            else if (event.type === "stage" && conversationIdRef.current) {
+              fetch("/api/track/stage", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ conversationId: conversationIdRef.current, stage: event.stage }),
+              }).catch(() => {});
+            }
           } catch {
             continue;
           }
@@ -223,14 +242,23 @@ function TiffanyCall() {
 
       if (toolName === "show_calendly") {
         setShowCalendly(true);
+        if (conversationIdRef.current) {
+          fetch("/api/track/booked", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ conversationId: conversationIdRef.current }),
+          }).catch(() => {});
+        }
       }
 
       if (fullResponse) {
+        // Strip [STAGE:N] tag before TTS and history
+        const cleanResponse = fullResponse.replace(/\s*\[STAGE:\d\]\s*/g, "");
         chatHistoryRef.current = [
           ...chatHistoryRef.current,
-          { role: "assistant", content: fullResponse },
+          { role: "assistant", content: cleanResponse },
         ];
-        await playTTS(fullResponse);
+        await playTTS(cleanResponse);
       }
     } catch (err) {
       if ((err as Error).name !== "AbortError") {
@@ -251,8 +279,20 @@ function TiffanyCall() {
       setIsConnected(true);
       chatHistoryRef.current = [{ role: "assistant", content: FIRST_MESSAGE }];
 
+      // Track conversation start in Supabase
+      try {
+        const res = await fetch("/api/track/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ agentCode: agentCode || null, prospectName: prospectName || "Unknown" }),
+        });
+        const data = await res.json();
+        if (data.conversationId) conversationIdRef.current = data.conversationId;
+      } catch {
+        // Tracking failure shouldn't block the conversation
+      }
+
       await playTTS(FIRST_MESSAGE);
-      // Listening already started inside playTTS for interrupt support
     } catch (err) {
       console.error("Failed to start:", err);
     }
