@@ -215,19 +215,32 @@ function TiffanyCall() {
 
   return (
     <div className="min-h-screen bg-black flex flex-col items-center justify-center">
-      {/* Sphere — the entire UI */}
-      <div
-        className={`cursor-pointer ${!isConnected ? "hover:scale-105 transition-transform" : ""}`}
-        onClick={!isConnected ? handleStart : undefined}
-      >
-        <TiffanyOrb isSpeaking={isSpeaking} isConnected={isConnected} />
-      </div>
+      {/* Sphere */}
+      <TiffanyOrb isSpeaking={isSpeaking} isConnected={isConnected} />
 
-      {/* Minimal end button — only when connected */}
+      {/* Start button with mic icon */}
+      {!isConnected && (
+        <button
+          onClick={handleStart}
+          className="mt-10 flex flex-col items-center gap-3 group"
+        >
+          <div className="w-14 h-14 rounded-full border border-gold/30 flex items-center justify-center group-hover:border-gold/60 group-hover:bg-gold/5 transition-all">
+            <svg className="w-6 h-6 text-gold/50 group-hover:text-gold transition-colors" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-1-9c0-.55.45-1 1-1s1 .45 1 1v6c0 .55-.45 1-1 1s-1-.45-1-1V5z" />
+              <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" />
+            </svg>
+          </div>
+          <span className="text-gold/40 text-xs tracking-widest uppercase group-hover:text-gold/70 transition-colors">
+            Start
+          </span>
+        </button>
+      )}
+
+      {/* End button — only when connected */}
       {isConnected && (
         <button
           onClick={handleEnd}
-          className="mt-8 w-10 h-10 rounded-full border border-gold/20 flex items-center justify-center text-gold/40 hover:text-gold hover:border-gold/50 transition-colors"
+          className="mt-10 w-10 h-10 rounded-full border border-gold/20 flex items-center justify-center text-gold/30 hover:text-red-400 hover:border-red-400/50 transition-colors"
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />

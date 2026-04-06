@@ -9,115 +9,76 @@ export default function TiffanyOrb({ isSpeaking, isConnected }: TiffanyOrbProps)
   const active = isConnected && isSpeaking;
 
   return (
-    <div className="relative flex items-center justify-center w-80 h-80">
-      {/* Outer particle ring — always visible when connected */}
-      {isConnected && (
-        <div className="absolute w-72 h-72 rounded-full animate-spin-slow">
-          <div className="absolute top-0 left-1/2 w-1.5 h-1.5 -ml-0.5 rounded-full bg-gold/60" />
-          <div className="absolute bottom-0 left-1/2 w-1 h-1 -ml-0.5 rounded-full bg-gold/40" />
-          <div className="absolute top-1/2 left-0 w-1 h-1 -mt-0.5 rounded-full bg-gold/50" />
-          <div className="absolute top-1/2 right-0 w-1.5 h-1.5 -mt-0.5 rounded-full bg-gold/30" />
-        </div>
-      )}
-
-      {/* Orbital rings */}
-      {isConnected && (
-        <>
-          <div className="absolute w-64 h-64 rounded-full border border-gold/10 animate-spin-slow" />
-          <div
-            className="absolute w-56 h-56 rounded-full border border-gold/15 animate-spin-reverse"
-            style={{ transform: "rotateX(60deg)" }}
-          />
-          <div
-            className="absolute w-60 h-60 rounded-full border border-gold/8 animate-spin-slow"
-            style={{ transform: "rotateX(60deg) rotateZ(90deg)" }}
-          />
-        </>
-      )}
-
-      {/* Speaking wave rings */}
+    <div className="relative flex items-center justify-center w-72 h-72">
+      {/* Speaking solar flare surges */}
       {active && (
         <>
-          <div className="absolute w-48 h-48 rounded-full border border-gold/30 animate-wave-1" />
-          <div className="absolute w-48 h-48 rounded-full border border-gold/20 animate-wave-2" />
-          <div className="absolute w-48 h-48 rounded-full border border-gold/10 animate-wave-3" />
+          <div className="absolute w-44 h-44 rounded-full bg-gold/20 blur-2xl animate-surge-1" />
+          <div className="absolute w-40 h-40 rounded-full bg-amber-500/15 blur-2xl animate-surge-2" />
+          <div className="absolute w-48 h-48 rounded-full bg-yellow-400/10 blur-3xl animate-surge-3" />
+          <div className="absolute w-36 h-36 rounded-full bg-orange-400/15 blur-2xl animate-surge-4" />
         </>
       )}
 
       {/* Ambient glow */}
       <div
-        className={`absolute w-44 h-44 rounded-full blur-3xl transition-all duration-700 ${
+        className={`absolute w-52 h-52 rounded-full blur-3xl transition-all duration-700 ${
           active
-            ? "bg-gold/30 scale-110"
+            ? "bg-gold/35 scale-110"
             : isConnected
-            ? "bg-gold/15"
-            : "bg-gold/5"
-        }`}
-      />
-
-      {/* Secondary inner glow */}
-      <div
-        className={`absolute w-32 h-32 rounded-full blur-2xl transition-all duration-500 ${
-          active
-            ? "bg-amber-400/25"
-            : isConnected
-            ? "bg-amber-400/10"
-            : "bg-transparent"
+            ? "bg-gold/20"
+            : "bg-gold/10"
         }`}
       />
 
       {/* Core sphere */}
       <div
-        className={`relative w-36 h-36 rounded-full transition-all duration-500 ${
+        className={`relative w-40 h-40 rounded-full transition-all duration-500 overflow-hidden ${
           active
-            ? "shadow-[0_0_80px_rgba(212,175,55,0.5),0_0_40px_rgba(212,175,55,0.3),inset_0_0_40px_rgba(212,175,55,0.2)] animate-pulse-gold"
+            ? "shadow-[0_0_100px_rgba(255,215,0,0.5),0_0_50px_rgba(212,175,55,0.4)] animate-glow-breathe"
             : isConnected
-            ? "shadow-[0_0_40px_rgba(212,175,55,0.25),0_0_20px_rgba(212,175,55,0.15),inset_0_0_20px_rgba(212,175,55,0.1)]"
-            : "shadow-[0_0_15px_rgba(212,175,55,0.1),inset_0_0_10px_rgba(212,175,55,0.05)]"
+            ? "shadow-[0_0_60px_rgba(212,175,55,0.3),0_0_30px_rgba(212,175,55,0.2)]"
+            : "shadow-[0_0_30px_rgba(212,175,55,0.15),0_0_15px_rgba(212,175,55,0.1)]"
         }`}
         style={{
-          background: isConnected
-            ? "radial-gradient(circle at 35% 30%, rgba(255,215,0,0.3), rgba(212,175,55,0.15) 40%, rgba(180,140,20,0.1) 60%, rgba(0,0,0,0.8))"
-            : "radial-gradient(circle at 35% 30%, rgba(212,175,55,0.15), rgba(100,80,20,0.1) 40%, rgba(0,0,0,0.9))",
+          background: active
+            ? "radial-gradient(circle at 40% 35%, #ffd700, #daa520 35%, #b8860b 60%, #8b6914 80%, #6b4f10)"
+            : isConnected
+            ? "radial-gradient(circle at 40% 35%, #f0c850, #c8a020 35%, #a08018 60%, #786010 80%, #604a0c)"
+            : "radial-gradient(circle at 40% 35%, #c8a030, #a08020 35%, #806818 60%, #605010 80%, #48380c)",
         }}
       >
-        {/* Surface highlight — top left specular */}
-        <div
-          className="absolute top-4 left-5 w-12 h-8 rounded-full blur-sm"
-          style={{
-            background: isConnected
-              ? "radial-gradient(ellipse, rgba(255,223,100,0.4), transparent)"
-              : "radial-gradient(ellipse, rgba(212,175,55,0.15), transparent)",
-          }}
-        />
-
-        {/* Core light point */}
-        <div
-          className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 rounded-full blur-md transition-all duration-500 ${
-            active
-              ? "bg-gold/40 scale-125"
-              : isConnected
-              ? "bg-gold/20"
-              : "bg-gold/5"
-          }`}
-        />
-
-        {/* Surface grid lines — Jarvis-style hexagonal feel */}
-        {isConnected && (
-          <svg
-            className="absolute inset-0 w-full h-full opacity-20"
-            viewBox="0 0 100 100"
-          >
-            <circle cx="50" cy="50" r="35" fill="none" stroke="rgb(212,175,55)" strokeWidth="0.3" />
-            <circle cx="50" cy="50" r="25" fill="none" stroke="rgb(212,175,55)" strokeWidth="0.2" />
-            <circle cx="50" cy="50" r="15" fill="none" stroke="rgb(212,175,55)" strokeWidth="0.2" />
-            <line x1="50" y1="15" x2="50" y2="85" stroke="rgb(212,175,55)" strokeWidth="0.15" />
-            <line x1="15" y1="50" x2="85" y2="50" stroke="rgb(212,175,55)" strokeWidth="0.15" />
-            <line x1="25" y1="25" x2="75" y2="75" stroke="rgb(212,175,55)" strokeWidth="0.1" />
-            <line x1="75" y1="25" x2="25" y2="75" stroke="rgb(212,175,55)" strokeWidth="0.1" />
-          </svg>
+        {/* Solar surface turbulence when speaking */}
+        {active && (
+          <>
+            <div
+              className="absolute w-16 h-16 rounded-full blur-md animate-flare-1"
+              style={{ top: "15%", left: "20%", background: "radial-gradient(circle, rgba(255,235,120,0.6), transparent)" }}
+            />
+            <div
+              className="absolute w-12 h-12 rounded-full blur-md animate-flare-2"
+              style={{ top: "50%", right: "10%", background: "radial-gradient(circle, rgba(255,220,80,0.5), transparent)" }}
+            />
+            <div
+              className="absolute w-14 h-10 rounded-full blur-md animate-flare-3"
+              style={{ bottom: "15%", left: "30%", background: "radial-gradient(circle, rgba(255,200,50,0.5), transparent)" }}
+            />
+            <div
+              className="absolute w-10 h-14 rounded-full blur-md animate-flare-4"
+              style={{ top: "25%", right: "25%", background: "radial-gradient(circle, rgba(255,240,140,0.4), transparent)" }}
+            />
+          </>
         )}
       </div>
+
+      {/* Expanding wave rings when speaking */}
+      {active && (
+        <>
+          <div className="absolute w-40 h-40 rounded-full border border-gold/25 animate-wave-1" />
+          <div className="absolute w-40 h-40 rounded-full border border-gold/15 animate-wave-2" />
+          <div className="absolute w-40 h-40 rounded-full border border-gold/10 animate-wave-3" />
+        </>
+      )}
     </div>
   );
 }
