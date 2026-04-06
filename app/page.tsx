@@ -333,6 +333,18 @@ function TiffanyCall() {
         <CalendlyEmbed
           url={CALENDLY_URL}
           name={prospectName}
+          onBooked={async () => {
+            setShowCalendly(false);
+            const closeMsg = firstName
+              ? `You're all set, ${firstName}. Before that call, remember — I'll send you our latest book with case studies and results from clients we've worked with. Set aside 30 minutes to go through it so your conversation with Alinka is as productive as possible. And if you can, send Alinka a few notes about your story ahead of time so she can get familiar before you connect. It was great talking with you.`
+              : "You're all set. Before that call, remember — I'll send you our latest book with case studies and results from clients we've worked with. Set aside 30 minutes to go through it so your conversation with Alinka is as productive as possible. And if you can, send Alinka a few notes about your story ahead of time so she can get familiar before you connect. It was great talking with you.";
+            setMessages((prev) => [...prev, { role: "ai", message: closeMsg }]);
+            chatHistoryRef.current = [
+              ...chatHistoryRef.current,
+              { role: "assistant", content: closeMsg },
+            ];
+            await playTTS(closeMsg);
+          }}
           onClose={() => setShowCalendly(false)}
         />
       )}

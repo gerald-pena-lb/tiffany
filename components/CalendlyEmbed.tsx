@@ -1,16 +1,30 @@
 "use client";
 
+import { useEffect } from "react";
+
 interface CalendlyEmbedProps {
   url: string;
   name?: string;
+  onBooked: () => void;
   onClose: () => void;
 }
 
-export default function CalendlyEmbed({ url, name, onClose }: CalendlyEmbedProps) {
+export default function CalendlyEmbed({ url, name, onBooked, onClose }: CalendlyEmbedProps) {
   const params = new URLSearchParams();
   if (name) params.set("name", name);
 
   const calendlyUrl = params.toString() ? `${url}?${params.toString()}` : url;
+
+  // Listen for Calendly booking event
+  useEffect(() => {
+    function handleMessage(event: MessageEvent) {
+      if (event.data?.event === "calendly.event_scheduled") {
+        onBooked();
+      }
+    }
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
+  }, [onBooked]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
