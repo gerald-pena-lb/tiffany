@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { ConversationProvider, useConversation } from "@elevenlabs/react";
+import { useConversation } from "@elevenlabs/react";
 import TiffanyOrb from "@/components/TiffanyOrb";
 import Transcript, { type TranscriptMessage } from "@/components/Transcript";
 import CalendlyEmbed from "@/components/CalendlyEmbed";
@@ -10,7 +10,7 @@ import TypeInput from "@/components/TypeInput";
 const AGENT_ID = process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID || "";
 const CALENDLY_URL = "https://calendly.com/talktoalinka/author-call";
 
-function TiffanyApp() {
+export default function Page() {
   const [messages, setMessages] = useState<TranscriptMessage[]>([]);
   const [showCalendly, setShowCalendly] = useState(false);
   const [prospectEmail, setProspectEmail] = useState("");
@@ -22,7 +22,7 @@ function TiffanyApp() {
     onError: (message) => console.error("Conversation error:", message),
     onMessage: (payload) => {
       setMessages((prev) => {
-        const role = payload.role === "user" ? "user" : "ai";
+        const role = payload.source === "user" ? "user" : "ai";
         const last = prev[prev.length - 1];
         if (last && last.role === role && last.message === payload.message) {
           return prev;
@@ -45,16 +45,17 @@ function TiffanyApp() {
   const handleStart = useCallback(async () => {
     try {
       await navigator.mediaDevices.getUserMedia({ audio: true });
-      conversation.startSession({
+      await conversation.startSession({
         agentId: AGENT_ID,
+        connectionType: "webrtc",
       });
     } catch (err) {
       console.error("Failed to start:", err);
     }
   }, [conversation]);
 
-  const handleEnd = useCallback(() => {
-    conversation.endSession();
+  const handleEnd = useCallback(async () => {
+    await conversation.endSession();
     setMessages([]);
   }, [conversation]);
 
@@ -143,13 +144,5 @@ function TiffanyApp() {
         />
       )}
     </div>
-  );
-}
-
-export default function Page() {
-  return (
-    <ConversationProvider>
-      <TiffanyApp />
-    </ConversationProvider>
   );
 }
