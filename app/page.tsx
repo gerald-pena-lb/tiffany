@@ -80,8 +80,6 @@ function TiffanyCall() {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) return;
 
-    recognitionRef.current?.stop();
-
     const recognition = new SpeechRecognition();
     recognition.continuous = true;
     recognition.interimResults = true;
