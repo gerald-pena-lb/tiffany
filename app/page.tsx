@@ -193,14 +193,8 @@ export default function Page() {
         }
       }
 
-      if (toolName === "show_calendly" && toolJson) {
-        try {
-          const params = JSON.parse(toolJson);
-          setShowCalendly(true);
-          if (params.email) setProspectEmail(params.email);
-        } catch {
-          // ignore
-        }
+      if (toolName === "show_calendly") {
+        setShowCalendly(true);
       }
 
       if (fullResponse) {
