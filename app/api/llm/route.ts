@@ -68,24 +68,88 @@ function convertMessages(messages: OpenAIMessage[]): {
   return { system, messages: merged };
 }
 
+function sseErrorResponse(error: string): Response {
+  const encoder = new TextEncoder();
+  const chatId = `chatcmpl-${Date.now()}`;
+  const created = Math.floor(Date.now() / 1000);
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(
+        encoder.encode(
+          `data: ${JSON.stringify({
+            id: chatId,
+            object: "chat.completion.chunk",
+            created,
+            model: "claude-opus-4-6",
+            choices: [
+              {
+                index: 0,
+                delta: { role: "assistant", content: "" },
+                finish_reason: null,
+              },
+            ],
+          })}\n\n`
+        )
+      );
+      controller.enqueue(
+        encoder.encode(
+          `data: ${JSON.stringify({
+            id: chatId,
+            object: "chat.completion.chunk",
+            created,
+            model: "claude-opus-4-6",
+            choices: [
+              {
+                index: 0,
+                delta: {
+                  content:
+                    "I'm having a technical issue right now. Please try again in a moment.",
+                },
+                finish_reason: null,
+              },
+            ],
+          })}\n\n`
+        )
+      );
+      controller.enqueue(
+        encoder.encode(
+          `data: ${JSON.stringify({
+            id: chatId,
+            object: "chat.completion.chunk",
+            created,
+            model: "claude-opus-4-6",
+            choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+          })}\n\n`
+        )
+      );
+      controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+      controller.close();
+    },
+  });
+  console.error("LLM Proxy error:", error);
+  return new Response(stream, {
+    headers: {
+      ...CORS_HEADERS,
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+    },
+  });
+}
+
 export async function POST(request: Request) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
-    return Response.json(
-      { error: "ANTHROPIC_API_KEY not configured" },
-      { status: 500, headers: CORS_HEADERS }
-    );
+    return sseErrorResponse("ANTHROPIC_API_KEY not configured");
   }
 
   let body: OpenAIRequest;
   try {
     body = await request.json();
   } catch {
-    return Response.json(
-      { error: "Invalid JSON" },
-      { status: 400, headers: CORS_HEADERS }
-    );
+    return sseErrorResponse("Invalid JSON in request body");
   }
+
+  console.log("LLM Proxy request:", JSON.stringify(body).slice(0, 500));
 
   const { system, messages } = convertMessages(body.messages || []);
 
@@ -98,9 +162,9 @@ export async function POST(request: Request) {
     messages,
   };
 
-  const anthropicResponse = await fetch(
-    "https://api.anthropic.com/v1/messages",
-    {
+  let anthropicResponse: Response;
+  try {
+    anthropicResponse = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -108,14 +172,16 @@ export async function POST(request: Request) {
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify(anthropicBody),
-    }
-  );
+    });
+  } catch (err) {
+    return sseErrorResponse(`Anthropic API fetch failed: ${err}`);
+  }
 
   if (!anthropicResponse.ok) {
     const errorText = await anthropicResponse.text();
-    return Response.json(
-      { error: "Anthropic API error", details: errorText },
-      { status: anthropicResponse.status, headers: CORS_HEADERS }
+    console.error("Anthropic API error:", anthropicResponse.status, errorText);
+    return sseErrorResponse(
+      `Anthropic API error ${anthropicResponse.status}: ${errorText}`
     );
   }
 

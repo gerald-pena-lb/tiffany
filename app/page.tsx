@@ -21,10 +21,14 @@ function TiffanyApp() {
     onDisconnect: () => console.log("Disconnected from Tiffany"),
     onError: (message) => console.error("Conversation error:", message),
     onMessage: (payload) => {
-      setMessages((prev) => [
-        ...prev,
-        { role: payload.role === "user" ? "user" : "ai", message: payload.message },
-      ]);
+      setMessages((prev) => {
+        const role = payload.role === "user" ? "user" : "ai";
+        const last = prev[prev.length - 1];
+        if (last && last.role === role && last.message === payload.message) {
+          return prev;
+        }
+        return [...prev, { role, message: payload.message }];
+      });
     },
     clientTools: {
       show_calendly: async (params: { email?: string; notes?: string }) => {
