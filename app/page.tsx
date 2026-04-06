@@ -48,6 +48,18 @@ function TiffanyCall() {
     };
   }, []);
 
+  // Watchdog: restart listening if the app goes quiet
+  useEffect(() => {
+    if (!isConnected) return;
+    const interval = setInterval(() => {
+      if (!isSpeaking && !processingRef.current && !recognitionRef.current) {
+        console.log("Watchdog: restarting listening");
+        startListening();
+      }
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [isConnected, isSpeaking]);
+
   // Send all tracking data to Supabase at once when call ends
   function saveToSupabase() {
     fetch("/api/track/start", {
