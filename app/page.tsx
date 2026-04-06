@@ -34,9 +34,10 @@ function TiffanyCall() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const chatHistoryRef = useRef<{ role: "user" | "assistant"; content: string }[]>([]);
-  const conversationIdRef = useRef<string | null>(null);
   const processingRef = useRef(false);
   const interruptedRef = useRef(false);
+  const lastStageRef = useRef(1);
+  const didBookRef = useRef(false);
 
   useEffect(() => {
     return () => {
@@ -45,19 +46,28 @@ function TiffanyCall() {
     };
   }, []);
 
-  // Stop Tiffany immediately — kill audio and abort any in-flight request
+  // Send all tracking data to Supabase at once when call ends
+  function saveToSupabase() {
+    fetch("/api/track/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        agentCode: agentCode || null,
+        prospectName: prospectName || "Unknown",
+        lastStage: lastStageRef.current,
+        booked: didBookRef.current,
+      }),
+    }).catch(() => {});
+  }
+
   function interruptTiffany() {
     interruptedRef.current = true;
-
-    // Stop audio playback
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
       audioRef.current = null;
     }
     setIsSpeaking(false);
-
-    // Abort in-flight chat/TTS requests
     abortRef.current?.abort();
   }
 
@@ -75,7 +85,6 @@ function TiffanyCall() {
     let finalTranscript = "";
     let silenceTimer: ReturnType<typeof setTimeout> | null = null;
     let hasInterrupted = false;
-
     let didSendMessage = false;
 
     recognition.onresult = (event: SpeechRecognitionEvent) => {
@@ -90,7 +99,6 @@ function TiffanyCall() {
         }
       }
 
-      // If user starts talking while Tiffany is speaking, interrupt her
       if ((interim || finalTranscript) && !hasInterrupted && audioRef.current && !audioRef.current.paused) {
         hasInterrupted = true;
         interruptTiffany();
@@ -108,14 +116,12 @@ function TiffanyCall() {
 
     recognition.onend = () => {
       setIsListening(false);
-      // Auto-restart if we didn't send a message (speech recognition timed out)
       if (!didSendMessage && !processingRef.current) {
         setTimeout(() => startListening(), 300);
       }
     };
     recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
       setIsListening(false);
-      // Auto-restart on recoverable errors
       if (event.error === "no-speech" || event.error === "aborted") {
         if (!processingRef.current) {
           setTimeout(() => startListening(), 300);
@@ -131,8 +137,6 @@ function TiffanyCall() {
   async function playTTS(text: string) {
     interruptedRef.current = false;
     setIsSpeaking(true);
-
-    // Start listening while speaking so user can interrupt
     startListening();
 
     try {
@@ -199,8 +203,6 @@ function TiffanyCall() {
     interruptedRef.current = false;
 
     chatHistoryRef.current = [...chatHistoryRef.current, { role: "user", content: text.trim() }];
-
-    // Stop listening while we get the response
     recognitionRef.current?.stop();
     setIsListening(false);
 
@@ -242,13 +244,7 @@ function TiffanyCall() {
             if (event.type === "text") fullResponse += event.text;
             else if (event.type === "tool_start") toolName = event.name;
             else if (event.type === "tool_delta") toolJson += event.json;
-            else if (event.type === "stage" && conversationIdRef.current) {
-              fetch("/api/track/stage", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ conversationId: conversationIdRef.current, stage: event.stage }),
-              }).catch(() => {});
-            }
+            else if (event.type === "stage") lastStageRef.current = event.stage;
           } catch {
             continue;
           }
@@ -256,18 +252,11 @@ function TiffanyCall() {
       }
 
       if (toolName === "show_calendly") {
+        didBookRef.current = true;
         setShowCalendly(true);
-        if (conversationIdRef.current) {
-          fetch("/api/track/booked", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ conversationId: conversationIdRef.current }),
-          }).catch(() => {});
-        }
       }
 
       if (fullResponse) {
-        // Strip [STAGE:N] tag before TTS and history
         const cleanResponse = fullResponse.replace(/\s*\[STAGE:\d\]\s*/g, "").trim();
         if (cleanResponse) {
           chatHistoryRef.current = [
@@ -292,19 +281,8 @@ function TiffanyCall() {
       await navigator.mediaDevices.getUserMedia({ audio: true });
       setIsConnected(true);
       chatHistoryRef.current = [{ role: "assistant", content: FIRST_MESSAGE }];
-
-      // Track conversation start in Supabase
-      try {
-        const res = await fetch("/api/track/start", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ agentCode: agentCode || null, prospectName: prospectName || "Unknown" }),
-        });
-        const data = await res.json();
-        if (data.conversationId) conversationIdRef.current = data.conversationId;
-      } catch {
-        // Tracking failure shouldn't block the conversation
-      }
+      lastStageRef.current = 1;
+      didBookRef.current = false;
 
       await playTTS(FIRST_MESSAGE);
     } catch (err) {
@@ -319,6 +297,12 @@ function TiffanyCall() {
       audioRef.current.pause();
       audioRef.current = null;
     }
+
+    // Save conversation data to Supabase only when call ends
+    if (isConnected) {
+      saveToSupabase();
+    }
+
     setIsConnected(false);
     setIsSpeaking(false);
     setIsListening(false);
@@ -364,6 +348,7 @@ function TiffanyCall() {
           name={prospectName}
           onBooked={async () => {
             setShowCalendly(false);
+            didBookRef.current = true;
             const closeMsg = firstName
               ? `You're all set, ${firstName}. Before that call, remember — I'll send you our latest book with case studies and results from clients we've worked with. Set aside 30 minutes to go through it so your conversation with Alinka is as productive as possible. And if you can, send Alinka a few notes about your story ahead of time so she can get familiar before you connect. It was great talking with you.`
               : "You're all set. Before that call, remember — I'll send you our latest book with case studies and results from clients we've worked with. Set aside 30 minutes to go through it so your conversation with Alinka is as productive as possible. And if you can, send Alinka a few notes about your story ahead of time so she can get familiar before you connect. It was great talking with you.";
