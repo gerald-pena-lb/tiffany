@@ -26,6 +26,7 @@ function TiffanyCall() {
   const abortRef = useRef<AbortController | null>(null);
   const chatHistoryRef = useRef<{ role: "user" | "assistant"; content: string }[]>([]);
   const processingRef = useRef(false);
+  const interruptedRef = useRef(false);
 
   useEffect(() => {
     return () => {
@@ -33,6 +34,22 @@ function TiffanyCall() {
       abortRef.current?.abort();
     };
   }, []);
+
+  // Stop Tiffany immediately — kill audio and abort any in-flight request
+  function interruptTiffany() {
+    interruptedRef.current = true;
+
+    // Stop audio playback
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+      audioRef.current = null;
+    }
+    setIsSpeaking(false);
+
+    // Abort in-flight chat/TTS requests
+    abortRef.current?.abort();
+  }
 
   function startListening() {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -47,13 +64,24 @@ function TiffanyCall() {
 
     let finalTranscript = "";
     let silenceTimer: ReturnType<typeof setTimeout> | null = null;
+    let hasInterrupted = false;
 
     recognition.onresult = (event: SpeechRecognitionEvent) => {
+      let interim = "";
       finalTranscript = "";
+
       for (let i = 0; i < event.results.length; i++) {
         if (event.results[i].isFinal) {
           finalTranscript += event.results[i][0].transcript;
+        } else {
+          interim += event.results[i][0].transcript;
         }
+      }
+
+      // If user starts talking while Tiffany is speaking, interrupt her
+      if ((interim || finalTranscript) && !hasInterrupted && audioRef.current && !audioRef.current.paused) {
+        hasInterrupted = true;
+        interruptTiffany();
       }
 
       if (silenceTimer) clearTimeout(silenceTimer);
@@ -74,33 +102,55 @@ function TiffanyCall() {
   }
 
   async function playTTS(text: string) {
+    interruptedRef.current = false;
     setIsSpeaking(true);
+
+    // Start listening while speaking so user can interrupt
+    startListening();
+
     try {
+      abortRef.current = new AbortController();
+
       const res = await fetch("/api/tts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text }),
+        signal: abortRef.current.signal,
       });
 
-      if (!res.ok) {
+      if (!res.ok || interruptedRef.current) {
         setIsSpeaking(false);
         return;
       }
 
       const audioBlob = await res.blob();
+      if (interruptedRef.current) {
+        setIsSpeaking(false);
+        return;
+      }
+
       const audioUrl = URL.createObjectURL(audioBlob);
 
       return new Promise<void>((resolve) => {
+        if (interruptedRef.current) {
+          URL.revokeObjectURL(audioUrl);
+          setIsSpeaking(false);
+          resolve();
+          return;
+        }
+
         const audio = new Audio(audioUrl);
         audioRef.current = audio;
         audio.onended = () => {
           setIsSpeaking(false);
           URL.revokeObjectURL(audioUrl);
+          audioRef.current = null;
           resolve();
         };
         audio.onerror = () => {
           setIsSpeaking(false);
           URL.revokeObjectURL(audioUrl);
+          audioRef.current = null;
           resolve();
         };
         audio.play().catch(() => {
@@ -108,7 +158,10 @@ function TiffanyCall() {
           resolve();
         });
       });
-    } catch {
+    } catch (err) {
+      if ((err as Error).name !== "AbortError") {
+        console.error("TTS error:", err);
+      }
       setIsSpeaking(false);
     }
   }
@@ -116,8 +169,11 @@ function TiffanyCall() {
   async function sendMessage(text: string) {
     if (!text.trim() || processingRef.current) return;
     processingRef.current = true;
+    interruptedRef.current = false;
 
     chatHistoryRef.current = [...chatHistoryRef.current, { role: "user", content: text.trim() }];
+
+    // Stop listening while we get the response
     recognitionRef.current?.stop();
     setIsListening(false);
 
@@ -182,7 +238,10 @@ function TiffanyCall() {
       }
     } finally {
       processingRef.current = false;
-      startListening();
+      // If not already listening (e.g. after TTS), start now
+      if (!recognitionRef.current || recognitionRef.current === null) {
+        startListening();
+      }
     }
   }
 
@@ -193,7 +252,7 @@ function TiffanyCall() {
       chatHistoryRef.current = [{ role: "assistant", content: FIRST_MESSAGE }];
 
       await playTTS(FIRST_MESSAGE);
-      startListening();
+      // Listening already started inside playTTS for interrupt support
     } catch (err) {
       console.error("Failed to start:", err);
     }
@@ -215,10 +274,8 @@ function TiffanyCall() {
 
   return (
     <div className="min-h-screen bg-black flex flex-col items-center justify-center">
-      {/* Sphere */}
       <TiffanyOrb isSpeaking={isSpeaking} isConnected={isConnected} />
 
-      {/* Start button with mic icon */}
       {!isConnected && (
         <button
           onClick={handleStart}
@@ -236,7 +293,6 @@ function TiffanyCall() {
         </button>
       )}
 
-      {/* End button — only when connected */}
       {isConnected && (
         <button
           onClick={handleEnd}
@@ -248,7 +304,6 @@ function TiffanyCall() {
         </button>
       )}
 
-      {/* Calendly overlay */}
       {showCalendly && (
         <CalendlyEmbed
           url={CALENDLY_URL}
