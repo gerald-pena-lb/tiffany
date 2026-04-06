@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useRef, useEffect } from "react";
 import TiffanyOrb from "@/components/TiffanyOrb";
 import Transcript, { type TranscriptMessage } from "@/components/Transcript";
 import CalendlyEmbed from "@/components/CalendlyEmbed";
@@ -12,9 +12,6 @@ const FIRST_MESSAGE =
 
 export default function Page() {
   const [messages, setMessages] = useState<TranscriptMessage[]>([]);
-  const [chatHistory, setChatHistory] = useState<
-    { role: "user" | "assistant"; content: string }[]
-  >([]);
   const [showCalendly, setShowCalendly] = useState(false);
   const [prospectEmail, setProspectEmail] = useState("");
   const [inputMode, setInputMode] = useState<"voice" | "type">("voice");
@@ -27,8 +24,8 @@ export default function Page() {
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const chatHistoryRef = useRef<{ role: "user" | "assistant"; content: string }[]>([]);
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       recognitionRef.current?.stop();
@@ -36,116 +33,67 @@ export default function Page() {
     };
   }, []);
 
-  // Send text to Claude and play TTS response
-  const sendMessage = useCallback(
-    async (text: string) => {
-      if (!text.trim() || isProcessing) return;
+  // --- Core functions (no useCallback to avoid circular deps) ---
 
-      // Add user message to transcript
-      const userMsg = { role: "user" as const, content: text.trim() };
-      const newHistory = [...chatHistory, userMsg];
-      setChatHistory(newHistory);
-      setMessages((prev) => [...prev, { role: "user", message: text.trim() }]);
-      setIsProcessing(true);
-      setInterimText("");
+  function startListening() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      console.error("Speech recognition not supported in this browser");
+      return;
+    }
 
-      // Stop listening while processing
-      recognitionRef.current?.stop();
-      setIsListening(false);
+    recognitionRef.current?.stop();
 
-      try {
-        abortRef.current = new AbortController();
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = "en-US";
 
-        // Call Claude
-        const res = await fetch("/api/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ messages: newHistory }),
-          signal: abortRef.current.signal,
-        });
+    let finalTranscript = "";
+    let silenceTimer: ReturnType<typeof setTimeout> | null = null;
 
-        if (!res.ok) {
-          console.error("Chat API error:", res.status);
-          setIsProcessing(false);
-          startListening();
-          return;
-        }
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
+      let interim = "";
+      finalTranscript = "";
 
-        // Read streamed response
-        const reader = res.body!.getReader();
-        const decoder = new TextDecoder();
-        let fullResponse = "";
-        let toolName = "";
-        let toolJson = "";
-        let buffer = "";
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() || "";
-
-          for (const line of lines) {
-            if (!line.startsWith("data: ")) continue;
-            try {
-              const event = JSON.parse(line.slice(6));
-              if (event.type === "text") {
-                fullResponse += event.text;
-              } else if (event.type === "tool_start") {
-                toolName = event.name;
-              } else if (event.type === "tool_delta") {
-                toolJson += event.json;
-              }
-            } catch {
-              continue;
-            }
-          }
-        }
-
-        // Handle tool calls (show_calendly)
-        if (toolName === "show_calendly" && toolJson) {
-          try {
-            const params = JSON.parse(toolJson);
-            setShowCalendly(true);
-            if (params.email) setProspectEmail(params.email);
-          } catch {
-            // ignore parse error
-          }
-        }
-
-        // Add assistant response
-        if (fullResponse) {
-          setChatHistory((prev) => [
-            ...prev,
-            { role: "assistant", content: fullResponse },
-          ]);
-          setMessages((prev) => [
-            ...prev,
-            { role: "ai", message: fullResponse },
-          ]);
-
-          // Play TTS
-          await playTTS(fullResponse);
-        }
-      } catch (err) {
-        if ((err as Error).name !== "AbortError") {
-          console.error("Message error:", err);
-        }
-      } finally {
-        setIsProcessing(false);
-        // Resume listening after response
-        if (isConnected && inputMode === "voice") {
-          startListening();
+      for (let i = 0; i < event.results.length; i++) {
+        const result = event.results[i];
+        if (result.isFinal) {
+          finalTranscript += result[0].transcript;
+        } else {
+          interim += result[0].transcript;
         }
       }
-    },
-    [chatHistory, isProcessing, isConnected, inputMode]
-  );
 
-  // Play TTS audio from ElevenLabs
-  const playTTS = async (text: string) => {
+      setInterimText(interim || finalTranscript);
+
+      if (silenceTimer) clearTimeout(silenceTimer);
+      if (finalTranscript.trim()) {
+        silenceTimer = setTimeout(() => {
+          recognition.stop();
+          sendMessage(finalTranscript);
+        }, 1500);
+      }
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+      if (silenceTimer) clearTimeout(silenceTimer);
+    };
+
+    recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
+      if (event.error !== "aborted" && event.error !== "no-speech") {
+        console.error("Speech recognition error:", event.error);
+      }
+      setIsListening(false);
+    };
+
+    recognition.start();
+    recognitionRef.current = recognition;
+    setIsListening(true);
+  }
+
+  async function playTTS(text: string) {
     setIsSpeaking(true);
     try {
       const res = await fetch("/api/tts", {
@@ -155,7 +103,8 @@ export default function Page() {
       });
 
       if (!res.ok) {
-        console.error("TTS error:", res.status);
+        const errData = await res.text();
+        console.error("TTS error:", res.status, errData);
         setIsSpeaking(false);
         return;
       }
@@ -185,95 +134,115 @@ export default function Page() {
       console.error("TTS playback error:", err);
       setIsSpeaking(false);
     }
-  };
+  }
 
-  // Start speech recognition
-  const startListening = useCallback(() => {
-    const SpeechRecognition =
-      window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      console.error("Speech recognition not supported");
-      return;
-    }
+  async function sendMessage(text: string) {
+    if (!text.trim()) return;
 
-    if (recognitionRef.current) {
-      recognitionRef.current.stop();
-    }
+    const userMsg = { role: "user" as const, content: text.trim() };
+    chatHistoryRef.current = [...chatHistoryRef.current, userMsg];
+    setMessages((prev) => [...prev, { role: "user", message: text.trim() }]);
+    setIsProcessing(true);
+    setInterimText("");
 
-    const recognition = new SpeechRecognition();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = "en-US";
+    recognitionRef.current?.stop();
+    setIsListening(false);
 
-    let finalTranscript = "";
-    let silenceTimer: ReturnType<typeof setTimeout> | null = null;
+    try {
+      abortRef.current = new AbortController();
 
-    recognition.onresult = (event: SpeechRecognitionEvent) => {
-      let interim = "";
-      finalTranscript = "";
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: chatHistoryRef.current }),
+        signal: abortRef.current.signal,
+      });
 
-      for (let i = 0; i < event.results.length; i++) {
-        const result = event.results[i];
-        if (result.isFinal) {
-          finalTranscript += result[0].transcript;
-        } else {
-          interim += result[0].transcript;
+      if (!res.ok) {
+        console.error("Chat API error:", res.status);
+        setIsProcessing(false);
+        startListening();
+        return;
+      }
+
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let fullResponse = "";
+      let toolName = "";
+      let toolJson = "";
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          try {
+            const event = JSON.parse(line.slice(6));
+            if (event.type === "text") fullResponse += event.text;
+            else if (event.type === "tool_start") toolName = event.name;
+            else if (event.type === "tool_delta") toolJson += event.json;
+          } catch {
+            continue;
+          }
         }
       }
 
-      setInterimText(interim || finalTranscript);
-
-      // Reset silence timer on new speech
-      if (silenceTimer) clearTimeout(silenceTimer);
-      if (finalTranscript.trim()) {
-        silenceTimer = setTimeout(() => {
-          recognition.stop();
-          sendMessage(finalTranscript);
-        }, 1500); // 1.5s silence = send
+      if (toolName === "show_calendly" && toolJson) {
+        try {
+          const params = JSON.parse(toolJson);
+          setShowCalendly(true);
+          if (params.email) setProspectEmail(params.email);
+        } catch {
+          // ignore
+        }
       }
-    };
 
-    recognition.onend = () => {
-      setIsListening(false);
-      if (silenceTimer) clearTimeout(silenceTimer);
-    };
+      if (fullResponse) {
+        chatHistoryRef.current = [
+          ...chatHistoryRef.current,
+          { role: "assistant", content: fullResponse },
+        ];
+        setMessages((prev) => [...prev, { role: "ai", message: fullResponse }]);
 
-    recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
-      if (event.error !== "aborted" && event.error !== "no-speech") {
-        console.error("Speech recognition error:", event.error);
+        await playTTS(fullResponse);
       }
-      setIsListening(false);
-    };
+    } catch (err) {
+      if ((err as Error).name !== "AbortError") {
+        console.error("Message error:", err);
+      }
+    } finally {
+      setIsProcessing(false);
+      startListening();
+    }
+  }
 
-    recognition.start();
-    recognitionRef.current = recognition;
-    setIsListening(true);
-  }, [sendMessage]);
+  // --- Event handlers ---
 
-  // Start the call
-  const handleStart = useCallback(async () => {
+  async function handleStart() {
     try {
-      // Request mic permission
       await navigator.mediaDevices.getUserMedia({ audio: true });
       setIsConnected(true);
       setMessages([]);
-      setChatHistory([]);
+      chatHistoryRef.current = [];
 
-      // Play first message
+      // First message
       setMessages([{ role: "ai", message: FIRST_MESSAGE }]);
-      setChatHistory([{ role: "assistant", content: FIRST_MESSAGE }]);
+      chatHistoryRef.current = [{ role: "assistant", content: FIRST_MESSAGE }];
 
       await playTTS(FIRST_MESSAGE);
-
-      // Start listening after first message plays
       startListening();
     } catch (err) {
       console.error("Failed to start:", err);
     }
-  }, [startListening]);
+  }
 
-  // End the call
-  const handleEnd = useCallback(() => {
+  function handleEnd() {
     recognitionRef.current?.stop();
     abortRef.current?.abort();
     if (audioRef.current) {
@@ -285,19 +254,13 @@ export default function Page() {
     setIsListening(false);
     setIsProcessing(false);
     setMessages([]);
-    setChatHistory([]);
+    chatHistoryRef.current = [];
     setInterimText("");
-  }, []);
+  }
 
-  // Handle typed input
-  const handleTypeSend = useCallback(
-    (text: string) => {
-      if (isConnected) {
-        sendMessage(text);
-      }
-    },
-    [isConnected, sendMessage]
-  );
+  function handleTypeSend(text: string) {
+    if (isConnected) sendMessage(text);
+  }
 
   const statusText = !isConnected
     ? "Click the mic to start your consultation"
