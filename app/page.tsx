@@ -34,6 +34,8 @@ function TiffanyCall() {
   const audioCtx = useRef<AudioContext | null>(null);
   const analyser = useRef<AnalyserNode | null>(null);
   const running = useRef(false);
+  const convoId = useRef<string | null>(null);
+  const trackInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastStage = useRef(1);
   const didBook = useRef(false);
 
@@ -294,6 +296,30 @@ function TiffanyCall() {
       lastStage.current = 1;
       didBook.current = false;
 
+      // Create Supabase record immediately
+      fetch("/api/track/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agentCode: agentCode || null, prospectName: prospectName || "Unknown" }),
+      })
+        .then((r) => r.json())
+        .then((d) => { if (d.conversationId) convoId.current = d.conversationId; })
+        .catch(() => {});
+
+      // Start 10-second tracking interval
+      trackInterval.current = setInterval(() => {
+        if (!convoId.current || history.current.length < 2) return;
+        fetch("/api/track/update", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            conversationId: convoId.current,
+            stage: lastStage.current,
+            messages: history.current,
+          }),
+        }).catch(() => {});
+      }, 10000);
+
       await speak(FIRST_MESSAGE);
       voiceLoop();
     } catch (err) {
@@ -304,16 +330,37 @@ function TiffanyCall() {
   function handleEnd() {
     running.current = false;
     cleanup();
-    fetch("/api/track/start", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        agentCode: agentCode || null,
-        prospectName: prospectName || "Unknown",
-        lastStage: lastStage.current,
-        booked: didBook.current,
-      }),
-    }).catch(() => {});
+
+    // Stop tracking interval
+    if (trackInterval.current) {
+      clearInterval(trackInterval.current);
+      trackInterval.current = null;
+    }
+
+    // Final update with booked status
+    if (convoId.current) {
+      fetch("/api/track/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversationId: convoId.current,
+          lastStage: lastStage.current,
+          booked: didBook.current,
+        }),
+      }).catch(() => {});
+      // One last summary update
+      fetch("/api/track/update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversationId: convoId.current,
+          stage: lastStage.current,
+          messages: history.current,
+        }),
+      }).catch(() => {});
+    }
+
+    convoId.current = null;
     setIsConnected(false);
     setIsSpeaking(false);
     setMessages([]);

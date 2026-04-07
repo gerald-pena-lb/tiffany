@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 
 interface Agent {
   id: string;
@@ -18,6 +18,7 @@ interface Conversation {
   last_stage: number;
   booked: boolean;
   ended_at: string | null;
+  summary: string | null;
 }
 
 interface Stats {
@@ -29,6 +30,7 @@ interface Stats {
 const STAGES = ["Connect", "Situation", "Problem", "Impact", "Wallet Test", "Book Call"];
 
 export default function DataPage() {
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [authed, setAuthed] = useState(false);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -304,7 +306,11 @@ export default function DataPage() {
               </thead>
               <tbody>
                 {conversations.map((c) => (
-                  <tr key={c.id} className="border-t border-gold/5">
+                  <React.Fragment key={c.id}>
+                  <tr
+                    className="border-t border-gold/5 cursor-pointer hover:bg-gold/5 transition-colors"
+                    onClick={() => setExpandedId(expandedId === c.id ? null : c.id)}
+                  >
                     <td className="py-2 text-gold/80">{c.prospect_name}</td>
                     <td className="py-2 text-gold/60">{c.agent_name}</td>
                     <td className="py-2">
@@ -323,17 +329,25 @@ export default function DataPage() {
                     </td>
                     <td className="py-2 text-right">
                       <button
-                        onClick={() => deleteConversation(c.id)}
+                        onClick={(e) => { e.stopPropagation(); deleteConversation(c.id); }}
                         className="text-red-400/50 hover:text-red-400 text-xs transition-colors"
                       >
                         Delete
                       </button>
                     </td>
                   </tr>
+                  {expandedId === c.id && c.summary && (
+                    <tr>
+                      <td colSpan={6} className="px-4 py-3 bg-gold/5">
+                        <pre className="text-gold/70 text-xs whitespace-pre-wrap font-sans leading-relaxed">{c.summary}</pre>
+                      </td>
+                    </tr>
+                  )}
+                  </React.Fragment>
                 ))}
                 {conversations.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="py-6 text-center text-gold/30 text-sm">
+                    <td colSpan={6} className="py-6 text-center text-gold/30 text-sm">
                       No conversations yet
                     </td>
                   </tr>
