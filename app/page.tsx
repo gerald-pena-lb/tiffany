@@ -306,7 +306,7 @@ function TiffanyCall() {
         .then((d) => { if (d.conversationId) convoId.current = d.conversationId; })
         .catch(() => {});
 
-      // Start 10-second tracking interval
+      // Start 20-second transcript push (no LLM calls — just raw text to Supabase)
       trackInterval.current = setInterval(() => {
         if (!convoId.current || history.current.length < 2) return;
         fetch("/api/track/update", {
@@ -318,7 +318,7 @@ function TiffanyCall() {
             messages: history.current,
           }),
         }).catch(() => {});
-      }, 10000);
+      }, 20000);
 
       await speak(FIRST_MESSAGE);
       voiceLoop();
@@ -337,24 +337,15 @@ function TiffanyCall() {
       trackInterval.current = null;
     }
 
-    // Final update with booked status
+    // Final update: save transcript + trigger Haiku NEPQ summary
     if (convoId.current) {
-      fetch("/api/track/start", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          conversationId: convoId.current,
-          lastStage: lastStage.current,
-          booked: didBook.current,
-        }),
-      }).catch(() => {});
-      // One last summary update
-      fetch("/api/track/update", {
+      fetch("/api/track/end", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           conversationId: convoId.current,
           stage: lastStage.current,
+          booked: didBook.current,
           messages: history.current,
         }),
       }).catch(() => {});
