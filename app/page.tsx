@@ -20,8 +20,8 @@ function TiffanyCall() {
   })();
 
   const FIRST_MESSAGE = firstName
-    ? `Hey ${firstName}. It's Tiffany from Girls Generation. Welcome to the call. What was it about your conversation with our team on LinkedIn that caused you to want to dive in deeper with me today?`
-    : "Hey. It's Tiffany from Girls Generation. Welcome to the call. What was it about your conversation with our team on LinkedIn that caused you to want to dive in deeper with me today?";
+    ? `Hey ${firstName}. It's Tiffany, your publishing consultant. Welcome to the call. What was it about your conversation with our team on LinkedIn that caused you to want to dive in deeper with me today?`
+    : "Hey. It's Tiffany, your publishing consultant. Welcome to the call. What was it about your conversation with our team on LinkedIn that caused you to want to dive in deeper with me today?";
 
   const [messages, setMessages] = useState<TranscriptMessage[]>([]);
   const [showCalendly, setShowCalendly] = useState(false);
