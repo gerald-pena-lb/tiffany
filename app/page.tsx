@@ -7,16 +7,13 @@ import Transcript, { type TranscriptMessage } from "@/components/Transcript";
 import CalendlyEmbed from "@/components/CalendlyEmbed";
 
 const CALENDLY_URL = "https://calendly.com/talktoalinka/author-call";
-const SILENCE_THRESHOLD = 0.015;
-const SILENCE_DURATION = 1100; // ms of silence before sending
 
 function TiffanyCall() {
   const searchParams = useSearchParams();
   const prospectName = searchParams.get("name") || "";
   const firstName = prospectName.split(" ")[0] || "";
   const agentCode = (() => {
-    const keys = Array.from(searchParams.keys());
-    for (const key of keys) {
+    for (const key of Array.from(searchParams.keys())) {
       if (/^\d+$/.test(key)) return key;
     }
     return "";
@@ -30,366 +27,230 @@ function TiffanyCall() {
   const [showCalendly, setShowCalendly] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
-  const [isListening, setIsListening] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false);
 
-  const chatHistoryRef = useRef<{ role: "user" | "assistant"; content: string }[]>([]);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const audioCtxRef = useRef<AudioContext | null>(null);
-  const lastStageRef = useRef(1);
-  const didBookRef = useRef(false);
-  const interruptedRef = useRef(false);
+  const history = useRef<{ role: "user" | "assistant"; content: string }[]>([]);
+  const audio = useRef<HTMLAudioElement | null>(null);
+  const stream = useRef<MediaStream | null>(null);
+  const running = useRef(false);
+  const lastStage = useRef(1);
+  const didBook = useRef(false);
 
-  useEffect(() => {
-    return () => {
-      stopMic();
-      abortRef.current?.abort();
-    };
-  }, []);
+  useEffect(() => () => { running.current = false; stopAll(); }, []);
 
-  // --- Mic + Silence Detection ---
+  function stopAll() {
+    audio.current?.pause();
+    audio.current = null;
+    stream.current?.getTracks().forEach((t) => t.stop());
+    stream.current = null;
+  }
 
-  function startMic() {
-    if (!streamRef.current) return;
-    setIsListening(true);
+  // ---- The entire voice loop ----
 
-    const audioCtx = new AudioContext();
-    const source = audioCtx.createMediaStreamSource(streamRef.current);
-    const analyser = audioCtx.createAnalyser();
-    analyser.fftSize = 512;
-    source.connect(analyser);
-    audioCtxRef.current = audioCtx;
-    analyserRef.current = analyser;
+  async function voiceLoop() {
+    while (running.current) {
+      // 1. Record until silence
+      const blob = await recordUntilSilence();
+      if (!running.current || !blob) continue;
 
-    const recorder = new MediaRecorder(streamRef.current, {
-      mimeType: MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-        ? "audio/webm;codecs=opus"
-        : "audio/webm",
+      // 2. Transcribe
+      const text = await transcribe(blob);
+      if (!running.current || !text) continue;
+
+      // 3. Show what user said
+      history.current.push({ role: "user", content: text });
+      setMessages((m) => [...m, { role: "user", message: text }]);
+
+      // 4. Get Claude's response
+      const response = await chat(text);
+      if (!running.current || !response) continue;
+
+      // 5. Show + speak response
+      history.current.push({ role: "assistant", content: response });
+      setMessages((m) => [...m, { role: "ai", message: response }]);
+      await speak(response);
+
+      // 6. Loop back to listening
+    }
+  }
+
+  // ---- Record audio until user stops talking ----
+
+  function recordUntilSilence(): Promise<Blob | null> {
+    return new Promise((resolve) => {
+      if (!stream.current || !running.current) { resolve(null); return; }
+
+      const ctx = new AudioContext();
+      const source = ctx.createMediaStreamSource(stream.current);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 512;
+      source.connect(analyser);
+
+      const recorder = new MediaRecorder(stream.current, {
+        mimeType: MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+          ? "audio/webm;codecs=opus" : "audio/webm",
+      });
+
+      const chunks: Blob[] = [];
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+      recorder.onstop = () => {
+        ctx.close();
+        const blob = chunks.length > 0 ? new Blob(chunks, { type: recorder.mimeType }) : null;
+        resolve(blob && blob.size > 1000 ? blob : null);
+      };
+
+      recorder.start();
+
+      const data = new Float32Array(analyser.fftSize);
+      let silenceStart: number | null = null;
+      let hasSound = false;
+
+      const check = () => {
+        if (!running.current || recorder.state !== "recording") {
+          if (recorder.state === "recording") recorder.stop();
+          return;
+        }
+
+        analyser.getFloatTimeDomainData(data);
+        const rms = Math.sqrt(data.reduce((s, v) => s + v * v, 0) / data.length);
+
+        if (rms > 0.015) {
+          hasSound = true;
+          silenceStart = null;
+
+          // Interrupt Tiffany if she's speaking
+          if (audio.current && !audio.current.paused) {
+            audio.current.pause();
+            audio.current = null;
+            setIsSpeaking(false);
+          }
+        } else if (hasSound) {
+          if (!silenceStart) silenceStart = Date.now();
+          else if (Date.now() - silenceStart > 1100) {
+            recorder.stop();
+            return;
+          }
+        }
+
+        requestAnimationFrame(check);
+      };
+
+      requestAnimationFrame(check);
     });
-    recorderRef.current = recorder;
-
-    const chunks: Blob[] = [];
-    recorder.ondataavailable = (e) => {
-      if (e.data.size > 0) chunks.push(e.data);
-    };
-
-    recorder.onstop = async () => {
-      if (chunks.length === 0) return;
-      const blob = new Blob(chunks, { type: recorder.mimeType });
-      chunks.length = 0;
-
-      // Skip tiny recordings (just noise)
-      if (blob.size < 1000) {
-        // Restart recording
-        if (recorderRef.current?.state === "inactive" && isConnectedRef.current) {
-          startRecording();
-        }
-        return;
-      }
-
-      await transcribeAndSend(blob);
-    };
-
-    startRecording();
   }
 
-  const isConnectedRef = useRef(false);
-  useEffect(() => { isConnectedRef.current = isConnected; }, [isConnected]);
+  // ---- ElevenLabs STT ----
 
-  function startRecording() {
-    const recorder = recorderRef.current;
-    const analyser = analyserRef.current;
-    if (!recorder || !analyser || recorder.state === "recording") return;
-
-    recorder.start();
-    setIsListening(true);
-
-    // Monitor audio levels for silence detection
-    const dataArray = new Float32Array(analyser.fftSize);
-    let silenceStart: number | null = null;
-    let hasSound = false;
-
-    const checkSilence = () => {
-      if (recorder.state !== "recording") return;
-
-      analyser.getFloatTimeDomainData(dataArray);
-      const rms = Math.sqrt(dataArray.reduce((sum, v) => sum + v * v, 0) / dataArray.length);
-
-      if (rms > SILENCE_THRESHOLD) {
-        hasSound = true;
-        silenceStart = null;
-      } else if (hasSound) {
-        if (!silenceStart) {
-          silenceStart = Date.now();
-        } else if (Date.now() - silenceStart > SILENCE_DURATION) {
-          // Silence detected after speech — stop recording to send
-          recorder.stop();
-          setIsListening(false);
-          return;
-        }
-      }
-
-      requestAnimationFrame(checkSilence);
-    };
-
-    requestAnimationFrame(checkSilence);
-  }
-
-  function stopMic() {
-    recorderRef.current?.stop();
-    recorderRef.current = null;
-    analyserRef.current = null;
-    audioCtxRef.current?.close();
-    audioCtxRef.current = null;
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    streamRef.current = null;
-    setIsListening(false);
-  }
-
-  // --- Transcribe + Send ---
-
-  async function transcribeAndSend(audioBlob: Blob) {
-    setIsProcessing(true);
-
+  async function transcribe(blob: Blob): Promise<string | null> {
     try {
-      // Send audio to STT
-      const sttForm = new FormData();
-      sttForm.append("audio", audioBlob);
-
-      const sttRes = await fetch("/api/stt", { method: "POST", body: sttForm });
-      if (!sttRes.ok) {
-        console.error("STT error:", sttRes.status);
-        setIsProcessing(false);
-        startRecording();
-        return;
-      }
-
-      const { text } = await sttRes.json();
-      if (!text?.trim()) {
-        setIsProcessing(false);
-        startRecording();
-        return;
-      }
-
-      // Got text — send to Claude
-      await sendMessage(text.trim());
-    } catch (err) {
-      console.error("Transcribe error:", err);
-      setIsProcessing(false);
-      startRecording();
-    }
+      const form = new FormData();
+      form.append("audio", blob);
+      const res = await fetch("/api/stt", { method: "POST", body: form });
+      if (!res.ok) return null;
+      const { text } = await res.json();
+      return text?.trim() || null;
+    } catch { return null; }
   }
 
-  // --- Interrupt ---
+  // ---- Claude ----
 
-  function interruptTiffany() {
-    interruptedRef.current = true;
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current.currentTime = 0;
-      audioRef.current = null;
-    }
-    setIsSpeaking(false);
-    abortRef.current?.abort();
-  }
-
-  // --- TTS ---
-
-  async function playTTS(text: string) {
-    interruptedRef.current = false;
-    setIsSpeaking(true);
-
+  async function chat(userText: string): Promise<string | null> {
     try {
-      abortRef.current = new AbortController();
-
-      const res = await fetch("/api/tts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
-        signal: abortRef.current.signal,
-      });
-
-      if (!res.ok || interruptedRef.current) {
-        setIsSpeaking(false);
-        return;
-      }
-
-      const audioBlob = await res.blob();
-      if (interruptedRef.current) {
-        setIsSpeaking(false);
-        return;
-      }
-
-      const audioUrl = URL.createObjectURL(audioBlob);
-
-      return new Promise<void>((resolve) => {
-        if (interruptedRef.current) {
-          URL.revokeObjectURL(audioUrl);
-          setIsSpeaking(false);
-          resolve();
-          return;
-        }
-
-        const audio = new Audio(audioUrl);
-        audioRef.current = audio;
-
-        const cleanup = () => {
-          setIsSpeaking(false);
-          URL.revokeObjectURL(audioUrl);
-          audioRef.current = null;
-          resolve();
-        };
-
-        audio.onended = cleanup;
-        audio.onerror = cleanup;
-        audio.onpause = () => {
-          if (interruptedRef.current) cleanup();
-        };
-
-        audio.play().catch(() => {
-          setIsSpeaking(false);
-          resolve();
-        });
-      });
-    } catch (err) {
-      if ((err as Error).name !== "AbortError") {
-        console.error("TTS error:", err);
-      }
-      setIsSpeaking(false);
-    }
-  }
-
-  // --- Chat ---
-
-  async function sendMessage(text: string) {
-    setIsProcessing(true);
-    interruptedRef.current = false;
-
-    chatHistoryRef.current = [...chatHistoryRef.current, { role: "user", content: text }];
-    setMessages((prev) => [...prev, { role: "user", message: text }]);
-
-    try {
-      abortRef.current = new AbortController();
-
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: chatHistoryRef.current, prospectName: prospectName || undefined }),
-        signal: abortRef.current.signal,
+        body: JSON.stringify({ messages: history.current, prospectName: prospectName || undefined }),
       });
-
-      if (!res.ok) {
-        setIsProcessing(false);
-        startRecording();
-        return;
-      }
+      if (!res.ok) return null;
 
       const reader = res.body!.getReader();
       const decoder = new TextDecoder();
-      let fullResponse = "";
-      let toolName = "";
-      let toolJson = "";
-      let buffer = "";
+      let full = "", toolName = "", toolJson = "", buf = "";
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split("\n");
+        buf = lines.pop() || "";
         for (const line of lines) {
           if (!line.startsWith("data: ")) continue;
           try {
-            const event = JSON.parse(line.slice(6));
-            if (event.type === "text") fullResponse += event.text;
-            else if (event.type === "tool_start") toolName = event.name;
-            else if (event.type === "tool_delta") toolJson += event.json;
-            else if (event.type === "stage") lastStageRef.current = event.stage;
-          } catch {
-            continue;
-          }
+            const e = JSON.parse(line.slice(6));
+            if (e.type === "text") full += e.text;
+            else if (e.type === "tool_start") toolName = e.name;
+            else if (e.type === "tool_delta") toolJson += e.json;
+            else if (e.type === "stage") lastStage.current = e.stage;
+          } catch { continue; }
         }
       }
 
       if (toolName === "show_calendly") {
-        didBookRef.current = true;
+        didBook.current = true;
         setShowCalendly(true);
       }
 
-      if (fullResponse) {
-        const cleanResponse = fullResponse.replace(/\s*\[STAGE:\d\]\s*/g, "").trim();
-        if (cleanResponse) {
-          chatHistoryRef.current = [
-            ...chatHistoryRef.current,
-            { role: "assistant", content: cleanResponse },
-          ];
-          setMessages((prev) => [...prev, { role: "ai", message: cleanResponse }]);
-          await playTTS(cleanResponse);
-        }
-      }
-    } catch (err) {
-      if ((err as Error).name !== "AbortError") {
-        console.error("Chat error:", err);
-      }
-    } finally {
-      setIsProcessing(false);
-      // Resume listening
-      startRecording();
-    }
+      return full.replace(/\s*\[STAGE:\d\]\s*/g, "").trim() || null;
+    } catch { return null; }
   }
 
-  // --- Controls ---
+  // ---- ElevenLabs TTS ----
 
-  function saveToSupabase() {
-    fetch("/api/track/start", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        agentCode: agentCode || null,
-        prospectName: prospectName || "Unknown",
-        lastStage: lastStageRef.current,
-        booked: didBookRef.current,
-      }),
-    }).catch(() => {});
+  async function speak(text: string): Promise<void> {
+    setIsSpeaking(true);
+    try {
+      const res = await fetch("/api/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      if (!res.ok) { setIsSpeaking(false); return; }
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+
+      await new Promise<void>((resolve) => {
+        const a = new Audio(url);
+        audio.current = a;
+        const done = () => { setIsSpeaking(false); URL.revokeObjectURL(url); audio.current = null; resolve(); };
+        a.onended = done;
+        a.onerror = done;
+        a.onpause = done;
+        a.play().catch(done);
+      });
+    } catch { setIsSpeaking(false); }
   }
+
+  // ---- Start / End ----
 
   async function handleStart() {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
+      stream.current = await navigator.mediaDevices.getUserMedia({ audio: true });
+      running.current = true;
       setIsConnected(true);
+      history.current = [{ role: "assistant", content: FIRST_MESSAGE }];
       setMessages([{ role: "ai", message: FIRST_MESSAGE }]);
-      chatHistoryRef.current = [{ role: "assistant", content: FIRST_MESSAGE }];
-      lastStageRef.current = 1;
-      didBookRef.current = false;
+      lastStage.current = 1;
+      didBook.current = false;
 
-      await playTTS(FIRST_MESSAGE);
-      startMic();
+      await speak(FIRST_MESSAGE);
+      voiceLoop();
     } catch (err) {
       console.error("Failed to start:", err);
     }
   }
 
   function handleEnd() {
-    stopMic();
-    abortRef.current?.abort();
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current = null;
-    }
-    if (isConnected) saveToSupabase();
+    running.current = false;
+    stopAll();
+    fetch("/api/track/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ agentCode: agentCode || null, prospectName: prospectName || "Unknown", lastStage: lastStage.current, booked: didBook.current }),
+    }).catch(() => {});
     setIsConnected(false);
     setIsSpeaking(false);
-    setIsListening(false);
-    setIsProcessing(false);
-    chatHistoryRef.current = [];
     setMessages([]);
+    history.current = [];
   }
 
   return (
@@ -409,10 +270,7 @@ function TiffanyCall() {
       )}
 
       {isConnected && (
-        <button
-          onClick={handleEnd}
-          className="mt-6 w-10 h-10 rounded-full border border-gray-300 flex items-center justify-center text-gray-400 hover:text-red-500 hover:border-red-400 transition-colors"
-        >
+        <button onClick={handleEnd} className="mt-6 w-10 h-10 rounded-full border border-gray-300 flex items-center justify-center text-gray-400 hover:text-red-500 hover:border-red-400 transition-colors">
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
           </svg>
@@ -431,13 +289,13 @@ function TiffanyCall() {
           name={prospectName}
           onBooked={async () => {
             setShowCalendly(false);
-            didBookRef.current = true;
-            const closeMsg = firstName
-              ? `You're all set, ${firstName}. Before that call, remember — I'll send you our latest book with case studies and results from clients we've worked with. Set aside 30 minutes to go through it so your conversation with Alinka is as productive as possible. And if you can, send Alinka a few notes about your story ahead of time so she can get familiar before you connect. It was great talking with you.`
-              : "You're all set. Before that call, remember — I'll send you our latest book with case studies and results from clients we've worked with. Set aside 30 minutes to go through it so your conversation with Alinka is as productive as possible. And if you can, send Alinka a few notes about your story ahead of time so she can get familiar before you connect. It was great talking with you.";
-            chatHistoryRef.current = [...chatHistoryRef.current, { role: "assistant", content: closeMsg }];
-            setMessages((prev) => [...prev, { role: "ai", message: closeMsg }]);
-            await playTTS(closeMsg);
+            didBook.current = true;
+            const msg = firstName
+              ? `You're all set, ${firstName}. Before that call, I'll send you our latest book with case studies. Set aside 30 minutes to go through it. And send Alinka a few notes about your story so she's prepared. It was great talking with you.`
+              : `You're all set. Before that call, I'll send you our latest book with case studies. Set aside 30 minutes to go through it. And send Alinka a few notes about your story so she's prepared. It was great talking with you.`;
+            history.current.push({ role: "assistant", content: msg });
+            setMessages((m) => [...m, { role: "ai", message: msg }]);
+            await speak(msg);
           }}
           onClose={() => setShowCalendly(false)}
         />
