@@ -265,13 +265,7 @@ function TiffanyCall() {
 
   async function handleStart() {
     try {
-      // Unlock audio on user tap (required for iOS/mobile)
-      const player = new Audio();
-      player.src = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=";
-      await player.play().catch(() => {});
-      audioEl.current = player;
-
-      // Get mic
+      // Get mic first (this shows the permission prompt)
       micStream.current = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
@@ -280,9 +274,12 @@ function TiffanyCall() {
         },
       });
 
+      // Create reusable audio element for TTS (must happen in tap context)
+      audioEl.current = new Audio();
+
       // Create persistent AudioContext + analyser for silence detection
       const ctx = new AudioContext();
-      await ctx.resume(); // ensure it's running on mobile
+      await ctx.resume();
       const source = ctx.createMediaStreamSource(micStream.current);
       const anal = ctx.createAnalyser();
       anal.fftSize = 512;
