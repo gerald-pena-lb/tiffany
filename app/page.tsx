@@ -34,6 +34,7 @@ function TiffanyCall() {
   const running = useRef(false);
   const lastStage = useRef(1);
   const didBook = useRef(false);
+  const playerRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => () => { running.current = false; stopAll(); }, []);
 
@@ -209,12 +210,25 @@ function TiffanyCall() {
       const url = URL.createObjectURL(blob);
 
       await new Promise<void>((resolve) => {
-        const a = new Audio(url);
+        // Reuse the player created on user tap (iOS requires this)
+        const a = playerRef.current || new Audio();
+        playerRef.current = a;
         audio.current = a;
-        const done = () => { setIsSpeaking(false); URL.revokeObjectURL(url); audio.current = null; resolve(); };
+
+        const done = () => {
+          setIsSpeaking(false);
+          URL.revokeObjectURL(url);
+          audio.current = null;
+          a.onended = null;
+          a.onerror = null;
+          a.onpause = null;
+          resolve();
+        };
+
         a.onended = done;
         a.onerror = done;
         a.onpause = done;
+        a.src = url;
         a.play().catch(done);
       });
     } catch { setIsSpeaking(false); }
@@ -224,6 +238,11 @@ function TiffanyCall() {
 
   async function handleStart() {
     try {
+      // Create audio player on user tap — iOS requires this for future playback
+      const player = new Audio();
+      player.play().catch(() => {}); // unlock audio context
+      playerRef.current = player;
+
       stream.current = await navigator.mediaDevices.getUserMedia({ audio: true });
       running.current = true;
       setIsConnected(true);
