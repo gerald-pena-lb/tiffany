@@ -88,6 +88,15 @@ export default function DataPage() {
     loadData();
   }
 
+  async function deleteConversation(id: string) {
+    await fetch("/api/data/conversations", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    loadData();
+  }
+
   if (!authed) {
     return (
       <div className="min-h-screen bg-black flex items-center justify-center">
@@ -290,6 +299,7 @@ export default function DataPage() {
                   <th className="text-left pb-3">Stage</th>
                   <th className="text-left pb-3">Booked</th>
                   <th className="text-left pb-3">Date</th>
+                  <th className="text-right pb-3"></th>
                 </tr>
               </thead>
               <tbody>
@@ -310,6 +320,14 @@ export default function DataPage() {
                     </td>
                     <td className="py-2 text-gold/40 text-xs">
                       {new Date(c.started_at).toLocaleDateString()}
+                    </td>
+                    <td className="py-2 text-right">
+                      <button
+                        onClick={() => deleteConversation(c.id)}
+                        className="text-red-400/50 hover:text-red-400 text-xs transition-colors"
+                      >
+                        Delete
+                      </button>
                     </td>
                   </tr>
                 ))}
