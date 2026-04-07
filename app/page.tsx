@@ -29,79 +29,97 @@ function TiffanyCall() {
   const [isSpeaking, setIsSpeaking] = useState(false);
 
   const history = useRef<{ role: "user" | "assistant"; content: string }[]>([]);
-  const audio = useRef<HTMLAudioElement | null>(null);
-  const stream = useRef<MediaStream | null>(null);
+  const audioEl = useRef<HTMLAudioElement | null>(null);
+  const micStream = useRef<MediaStream | null>(null);
+  const audioCtx = useRef<AudioContext | null>(null);
+  const analyser = useRef<AnalyserNode | null>(null);
   const running = useRef(false);
   const lastStage = useRef(1);
   const didBook = useRef(false);
-  const playerRef = useRef<HTMLAudioElement | null>(null);
 
-  useEffect(() => () => { running.current = false; stopAll(); }, []);
+  useEffect(() => () => { running.current = false; cleanup(); }, []);
 
-  function stopAll() {
-    audio.current?.pause();
-    audio.current = null;
-    stream.current?.getTracks().forEach((t) => t.stop());
-    stream.current = null;
+  function cleanup() {
+    audioEl.current?.pause();
+    audioEl.current = null;
+    micStream.current?.getTracks().forEach((t) => t.stop());
+    micStream.current = null;
+    audioCtx.current?.close().catch(() => {});
+    audioCtx.current = null;
+    analyser.current = null;
   }
 
-  // ---- The entire voice loop ----
+  // Pick a supported recording format
+  function getMimeType(): string {
+    const types = [
+      "audio/webm;codecs=opus",
+      "audio/webm",
+      "audio/mp4",
+      "audio/ogg;codecs=opus",
+      "",
+    ];
+    for (const t of types) {
+      if (!t || MediaRecorder.isTypeSupported(t)) return t;
+    }
+    return "";
+  }
+
+  // ---- Voice loop ----
 
   async function voiceLoop() {
     while (running.current) {
-      // 1. Record until silence
       const blob = await recordUntilSilence();
       if (!running.current || !blob) continue;
 
-      // 2. Transcribe
       const text = await transcribe(blob);
       if (!running.current || !text) continue;
 
-      // 3. Show what user said
       history.current.push({ role: "user", content: text });
       setMessages((m) => [...m, { role: "user", message: text }]);
 
-      // 4. Get Claude's response
       const response = await chat(text);
       if (!running.current || !response) continue;
 
-      // 5. Show + speak response
       history.current.push({ role: "assistant", content: response });
       setMessages((m) => [...m, { role: "ai", message: response }]);
       await speak(response);
-
-      // 6. Loop back to listening
     }
   }
 
-  // ---- Record audio until user stops talking ----
+  // ---- Record until silence ----
 
   function recordUntilSilence(): Promise<Blob | null> {
     return new Promise((resolve) => {
-      if (!stream.current || !running.current) { resolve(null); return; }
+      if (!micStream.current || !running.current || !analyser.current) {
+        resolve(null);
+        return;
+      }
 
-      const ctx = new AudioContext();
-      const source = ctx.createMediaStreamSource(stream.current);
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 512;
-      source.connect(analyser);
+      // Resume AudioContext if suspended (mobile browsers)
+      if (audioCtx.current?.state === "suspended") {
+        audioCtx.current.resume();
+      }
 
-      const recorder = new MediaRecorder(stream.current, {
-        mimeType: MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-          ? "audio/webm;codecs=opus" : "audio/webm",
-      });
+      const mime = getMimeType();
+      const recorder = new MediaRecorder(
+        micStream.current,
+        mime ? { mimeType: mime } : undefined
+      );
 
       const chunks: Blob[] = [];
-      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunks.push(e.data);
+      };
       recorder.onstop = () => {
-        ctx.close();
-        const blob = chunks.length > 0 ? new Blob(chunks, { type: recorder.mimeType }) : null;
-        resolve(blob && blob.size > 1000 ? blob : null);
+        const blob = chunks.length > 0
+          ? new Blob(chunks, { type: recorder.mimeType || "audio/webm" })
+          : null;
+        resolve(blob && blob.size > 500 ? blob : null);
       };
 
       recorder.start();
 
-      const data = new Float32Array(analyser.fftSize);
+      const data = new Float32Array(analyser.current!.fftSize);
       let silenceStart: number | null = null;
       let hasSound = false;
 
@@ -111,17 +129,17 @@ function TiffanyCall() {
           return;
         }
 
-        analyser.getFloatTimeDomainData(data);
+        analyser.current!.getFloatTimeDomainData(data);
         const rms = Math.sqrt(data.reduce((s, v) => s + v * v, 0) / data.length);
 
-        if (rms > 0.015) {
+        if (rms > 0.012) {
           hasSound = true;
           silenceStart = null;
 
           // Interrupt Tiffany if she's speaking
-          if (audio.current && !audio.current.paused) {
-            audio.current.pause();
-            audio.current = null;
+          if (audioEl.current && !audioEl.current.paused) {
+            audioEl.current.pause();
+            audioEl.current.currentTime = 0;
             setIsSpeaking(false);
           }
         } else if (hasSound) {
@@ -149,17 +167,22 @@ function TiffanyCall() {
       if (!res.ok) return null;
       const { text } = await res.json();
       return text?.trim() || null;
-    } catch { return null; }
+    } catch {
+      return null;
+    }
   }
 
   // ---- Claude ----
 
-  async function chat(userText: string): Promise<string | null> {
+  async function chat(_userText: string): Promise<string | null> {
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: history.current, prospectName: prospectName || undefined }),
+        body: JSON.stringify({
+          messages: history.current,
+          prospectName: prospectName || undefined,
+        }),
       });
       if (!res.ok) return null;
 
@@ -191,7 +214,9 @@ function TiffanyCall() {
       }
 
       return full.replace(/\s*\[STAGE:\d\]\s*/g, "").trim() || null;
-    } catch { return null; }
+    } catch {
+      return null;
+    }
   }
 
   // ---- ElevenLabs TTS ----
@@ -204,21 +229,21 @@ function TiffanyCall() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text }),
       });
-      if (!res.ok) { setIsSpeaking(false); return; }
+      if (!res.ok) {
+        setIsSpeaking(false);
+        return;
+      }
 
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
 
       await new Promise<void>((resolve) => {
-        // Reuse the player created on user tap (iOS requires this)
-        const a = playerRef.current || new Audio();
-        playerRef.current = a;
-        audio.current = a;
+        const a = audioEl.current || new Audio();
+        audioEl.current = a;
 
         const done = () => {
           setIsSpeaking(false);
           URL.revokeObjectURL(url);
-          audio.current = null;
           a.onended = null;
           a.onerror = null;
           a.onpause = null;
@@ -231,19 +256,40 @@ function TiffanyCall() {
         a.src = url;
         a.play().catch(done);
       });
-    } catch { setIsSpeaking(false); }
+    } catch {
+      setIsSpeaking(false);
+    }
   }
 
   // ---- Start / End ----
 
   async function handleStart() {
     try {
-      // Create audio player on user tap — iOS requires this for future playback
+      // Unlock audio on user tap (required for iOS/mobile)
       const player = new Audio();
-      player.play().catch(() => {}); // unlock audio context
-      playerRef.current = player;
+      player.src = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=";
+      await player.play().catch(() => {});
+      audioEl.current = player;
 
-      stream.current = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Get mic
+      micStream.current = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+
+      // Create persistent AudioContext + analyser for silence detection
+      const ctx = new AudioContext();
+      await ctx.resume(); // ensure it's running on mobile
+      const source = ctx.createMediaStreamSource(micStream.current);
+      const anal = ctx.createAnalyser();
+      anal.fftSize = 512;
+      source.connect(anal);
+      audioCtx.current = ctx;
+      analyser.current = anal;
+
       running.current = true;
       setIsConnected(true);
       history.current = [{ role: "assistant", content: FIRST_MESSAGE }];
@@ -260,11 +306,16 @@ function TiffanyCall() {
 
   function handleEnd() {
     running.current = false;
-    stopAll();
+    cleanup();
     fetch("/api/track/start", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ agentCode: agentCode || null, prospectName: prospectName || "Unknown", lastStage: lastStage.current, booked: didBook.current }),
+      body: JSON.stringify({
+        agentCode: agentCode || null,
+        prospectName: prospectName || "Unknown",
+        lastStage: lastStage.current,
+        booked: didBook.current,
+      }),
     }).catch(() => {});
     setIsConnected(false);
     setIsSpeaking(false);
