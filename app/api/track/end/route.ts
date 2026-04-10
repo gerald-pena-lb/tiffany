@@ -19,21 +19,48 @@ export async function POST(request: Request) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
 
   try {
-    const { conversationId, stage, booked, messages } = await request.json();
+    const { conversationId, stage, booked, chunk, messages } = await request.json();
     if (!conversationId) {
       return Response.json({ error: "Missing conversationId" }, { status: 400 });
     }
 
-    // Format transcript
-    const transcript = (messages || [])
-      .map((m: { role: string; content: string }) =>
-        `${m.role === "assistant" ? "Tiffany" : "Prospect"}: ${m.content}`
-      )
-      .join("\n\n");
+    const supabase = getSupabase();
 
-    // Generate NEPQ summary via Haiku (only if we have an API key and messages)
+    // Append any remaining chunk to transcript
+    if (chunk && chunk.length > 0) {
+      const newText = chunk
+        .map((m: { role: string; content: string }) =>
+          `${m.role === "assistant" ? "Tiffany" : "Prospect"}: ${m.content}`
+        )
+        .join("\n\n");
+
+      const { data } = await supabase
+        .from("conversations")
+        .select("transcript")
+        .eq("id", conversationId)
+        .single();
+
+      const existing = data?.transcript || "";
+      const transcript = existing ? `${existing}\n\n${newText}` : newText;
+
+      await supabase
+        .from("conversations")
+        .update({ transcript })
+        .eq("id", conversationId);
+    }
+
+    // Read final transcript for summary
+    const { data: convo } = await supabase
+      .from("conversations")
+      .select("transcript")
+      .eq("id", conversationId)
+      .single();
+
+    const fullTranscript = convo?.transcript || "";
+
+    // Generate NEPQ summary via Haiku (once, at end)
     let summary = "";
-    if (apiKey && messages?.length > 1) {
+    if (apiKey && fullTranscript.length > 50) {
       try {
         const haikuRes = await fetch("https://api.anthropic.com/v1/messages", {
           method: "POST",
@@ -47,7 +74,7 @@ export async function POST(request: Request) {
             max_tokens: 300,
             temperature: 0,
             system: SUMMARY_PROMPT,
-            messages: [{ role: "user", content: transcript }],
+            messages: [{ role: "user", content: fullTranscript }],
           }),
         });
 
@@ -60,14 +87,12 @@ export async function POST(request: Request) {
       }
     }
 
-    // Update Supabase with everything
-    const supabase = getSupabase();
+    // Final update
     await supabase
       .from("conversations")
       .update({
         last_stage: stage || 1,
         booked: booked || false,
-        transcript,
         summary: summary || null,
         ended_at: new Date().toISOString(),
       })

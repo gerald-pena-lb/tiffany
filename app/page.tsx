@@ -36,6 +36,7 @@ function TiffanyCall() {
   const running = useRef(false);
   const convoId = useRef<string | null>(null);
   const trackInterval = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastSentIdx = useRef(0);
   const lastStage = useRef(1);
   const didBook = useRef(false);
 
@@ -306,16 +307,20 @@ function TiffanyCall() {
         .then((d) => { if (d.conversationId) convoId.current = d.conversationId; })
         .catch(() => {});
 
-      // Start 20-second transcript push (no LLM calls — just raw text to Supabase)
+      lastSentIdx.current = 0;
+
+      // Every 20s: send only NEW messages since last push
       trackInterval.current = setInterval(() => {
-        if (!convoId.current || history.current.length < 2) return;
+        if (!convoId.current || history.current.length <= lastSentIdx.current) return;
+        const chunk = history.current.slice(lastSentIdx.current);
+        lastSentIdx.current = history.current.length;
         fetch("/api/track/update", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             conversationId: convoId.current,
             stage: lastStage.current,
-            messages: history.current,
+            chunk,
           }),
         }).catch(() => {});
       }, 20000);
@@ -337,8 +342,9 @@ function TiffanyCall() {
       trackInterval.current = null;
     }
 
-    // Final update: save transcript + trigger Haiku NEPQ summary
+    // Send any remaining unsent messages + trigger Haiku NEPQ summary
     if (convoId.current) {
+      const remainingChunk = history.current.slice(lastSentIdx.current);
       fetch("/api/track/end", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -346,6 +352,7 @@ function TiffanyCall() {
           conversationId: convoId.current,
           stage: lastStage.current,
           booked: didBook.current,
+          chunk: remainingChunk.length > 0 ? remainingChunk : undefined,
           messages: history.current,
         }),
       }).catch(() => {});

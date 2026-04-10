@@ -19,6 +19,7 @@ interface Conversation {
   booked: boolean;
   ended_at: string | null;
   summary: string | null;
+  transcript: string | null;
 }
 
 interface Stats {
@@ -336,10 +337,24 @@ export default function DataPage() {
                       </button>
                     </td>
                   </tr>
-                  {expandedId === c.id && c.summary && (
+                  {expandedId === c.id && (
                     <tr>
-                      <td colSpan={6} className="px-4 py-3 bg-gold/5">
-                        <pre className="text-gold/70 text-xs whitespace-pre-wrap font-sans leading-relaxed">{c.summary}</pre>
+                      <td colSpan={6} className="px-4 py-3 bg-gold/5 space-y-4">
+                        {c.summary && (
+                          <div>
+                            <p className="text-gold/50 text-[10px] uppercase tracking-wider mb-1">NEPQ Summary</p>
+                            <pre className="text-gold/70 text-xs whitespace-pre-wrap font-sans leading-relaxed">{c.summary}</pre>
+                          </div>
+                        )}
+                        {c.transcript && (
+                          <div>
+                            <p className="text-gold/50 text-[10px] uppercase tracking-wider mb-1">Transcript</p>
+                            <pre className="text-gold/60 text-xs whitespace-pre-wrap font-sans leading-relaxed max-h-96 overflow-y-auto">{c.transcript}</pre>
+                          </div>
+                        )}
+                        {!c.summary && !c.transcript && (
+                          <p className="text-gold/30 text-xs">No data yet — call may still be in progress</p>
+                        )}
                       </td>
                     </tr>
                   )}
