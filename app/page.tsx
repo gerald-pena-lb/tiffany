@@ -34,6 +34,8 @@ function TiffanyCall() {
   const audioCtx = useRef<AudioContext | null>(null);
   const analyser = useRef<AnalyserNode | null>(null);
   const running = useRef(false);
+  const processing = useRef(false);
+  const pendingBlob = useRef<Blob | null>(null);
   const convoId = useRef<string | null>(null);
   const trackInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastSentIdx = useRef(0);
@@ -52,112 +54,142 @@ function TiffanyCall() {
     analyser.current = null;
   }
 
-  // Pick a supported recording format
   function getMimeType(): string {
-    const types = [
-      "audio/webm;codecs=opus",
-      "audio/webm",
-      "audio/mp4",
-      "audio/ogg;codecs=opus",
-      "",
-    ];
+    const types = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus", ""];
     for (const t of types) {
       if (!t || MediaRecorder.isTypeSupported(t)) return t;
     }
     return "";
   }
 
-  // ---- Voice loop ----
+  // ---- Continuous recording loop (always runs, never stops) ----
 
-  async function voiceLoop() {
-    while (running.current) {
-      const blob = await recordUntilSilence();
-      if (!running.current || !blob) continue;
+  function recordLoop() {
+    if (!micStream.current || !running.current || !analyser.current) return;
 
-      const text = await transcribe(blob);
-      if (!running.current || !text) continue;
-
-      history.current.push({ role: "user", content: text });
-      setMessages((m) => [...m, { role: "user", message: text }]);
-
-      const response = await chat(text);
-      if (!running.current || !response) continue;
-
-      history.current.push({ role: "assistant", content: response });
-      setMessages((m) => [...m, { role: "ai", message: response }]);
-      await speak(response);
+    if (audioCtx.current?.state === "suspended") {
+      audioCtx.current.resume();
     }
-  }
 
-  // ---- Record until silence ----
+    const mime = getMimeType();
+    const recorder = new MediaRecorder(
+      micStream.current,
+      mime ? { mimeType: mime } : undefined
+    );
 
-  function recordUntilSilence(): Promise<Blob | null> {
-    return new Promise((resolve) => {
-      if (!micStream.current || !running.current || !analyser.current) {
-        resolve(null);
+    const chunks: Blob[] = [];
+    recorder.ondataavailable = (e) => {
+      if (e.data.size > 0) chunks.push(e.data);
+    };
+
+    recorder.onstop = () => {
+      if (!running.current) return;
+
+      const blob = chunks.length > 0
+        ? new Blob(chunks, { type: recorder.mimeType || "audio/webm" })
+        : null;
+
+      // If we got a valid recording, process it
+      if (blob && blob.size > 500) {
+        processBlob(blob);
+      }
+
+      // Immediately start next recording (never stop listening)
+      if (running.current) {
+        recordLoop();
+      }
+    };
+
+    recorder.start();
+
+    const data = new Float32Array(analyser.current!.fftSize);
+    let silenceStart: number | null = null;
+    let hasSound = false;
+
+    const check = () => {
+      if (!running.current || recorder.state !== "recording") {
+        if (recorder.state === "recording") recorder.stop();
         return;
       }
 
-      // Resume AudioContext if suspended (mobile browsers)
-      if (audioCtx.current?.state === "suspended") {
-        audioCtx.current.resume();
-      }
+      analyser.current!.getFloatTimeDomainData(data);
+      const rms = Math.sqrt(data.reduce((s, v) => s + v * v, 0) / data.length);
 
-      const mime = getMimeType();
-      const recorder = new MediaRecorder(
-        micStream.current,
-        mime ? { mimeType: mime } : undefined
-      );
+      if (rms > 0.012) {
+        hasSound = true;
+        silenceStart = null;
 
-      const chunks: Blob[] = [];
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunks.push(e.data);
-      };
-      recorder.onstop = () => {
-        const blob = chunks.length > 0
-          ? new Blob(chunks, { type: recorder.mimeType || "audio/webm" })
-          : null;
-        resolve(blob && blob.size > 500 ? blob : null);
-      };
-
-      recorder.start();
-
-      const data = new Float32Array(analyser.current!.fftSize);
-      let silenceStart: number | null = null;
-      let hasSound = false;
-
-      const check = () => {
-        if (!running.current || recorder.state !== "recording") {
-          if (recorder.state === "recording") recorder.stop();
+        // Interrupt Tiffany if she's speaking
+        if (audioEl.current && !audioEl.current.paused) {
+          audioEl.current.pause();
+          audioEl.current.currentTime = 0;
+          setIsSpeaking(false);
+        }
+      } else if (hasSound) {
+        if (!silenceStart) silenceStart = Date.now();
+        else if (Date.now() - silenceStart > 2200) {
+          recorder.stop();
           return;
         }
-
-        analyser.current!.getFloatTimeDomainData(data);
-        const rms = Math.sqrt(data.reduce((s, v) => s + v * v, 0) / data.length);
-
-        if (rms > 0.012) {
-          hasSound = true;
-          silenceStart = null;
-
-          // Interrupt Tiffany if she's speaking
-          if (audioEl.current && !audioEl.current.paused) {
-            audioEl.current.pause();
-            audioEl.current.currentTime = 0;
-            setIsSpeaking(false);
-          }
-        } else if (hasSound) {
-          if (!silenceStart) silenceStart = Date.now();
-          else if (Date.now() - silenceStart > 2200) {
-            recorder.stop();
-            return;
-          }
-        }
-
-        requestAnimationFrame(check);
-      };
+      }
 
       requestAnimationFrame(check);
-    });
+    };
+
+    requestAnimationFrame(check);
+  }
+
+  // ---- Process a recorded blob ----
+
+  async function processBlob(blob: Blob) {
+    // If already processing, queue this blob (latest wins)
+    if (processing.current) {
+      pendingBlob.current = blob;
+      return;
+    }
+
+    processing.current = true;
+
+    try {
+      // Transcribe
+      const text = await transcribe(blob);
+      if (!running.current || !text) {
+        processing.current = false;
+        processPending();
+        return;
+      }
+
+      // Add to history
+      history.current.push({ role: "user", content: text });
+      setMessages((m) => [...m, { role: "user", message: text }]);
+
+      // Get Claude's response
+      const response = await chat();
+      if (!running.current || !response) {
+        processing.current = false;
+        processPending();
+        return;
+      }
+
+      // Add response + speak
+      history.current.push({ role: "assistant", content: response });
+      setMessages((m) => [...m, { role: "ai", message: response }]);
+      await speak(response);
+    } catch (err) {
+      console.error("Process error:", err);
+    }
+
+    processing.current = false;
+    processPending();
+  }
+
+  // Process any queued blob
+  function processPending() {
+    if (pendingBlob.current) {
+      const blob = pendingBlob.current;
+      pendingBlob.current = null;
+      processBlob(blob);
+    }
   }
 
   // ---- ElevenLabs STT ----
@@ -177,7 +209,7 @@ function TiffanyCall() {
 
   // ---- Claude ----
 
-  async function chat(_userText: string): Promise<string | null> {
+  async function chat(): Promise<string | null> {
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
@@ -268,19 +300,12 @@ function TiffanyCall() {
 
   async function handleStart() {
     try {
-      // Get mic first (this shows the permission prompt)
       micStream.current = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
 
-      // Create reusable audio element for TTS (must happen in tap context)
       audioEl.current = new Audio();
 
-      // Create persistent AudioContext + analyser for silence detection
       const ctx = new AudioContext();
       await ctx.resume();
       const source = ctx.createMediaStreamSource(micStream.current);
@@ -291,13 +316,14 @@ function TiffanyCall() {
       analyser.current = anal;
 
       running.current = true;
+      processing.current = false;
+      pendingBlob.current = null;
       setIsConnected(true);
       history.current = [{ role: "assistant", content: FIRST_MESSAGE }];
       setMessages([{ role: "ai", message: FIRST_MESSAGE }]);
       lastStage.current = 1;
       didBook.current = false;
 
-      // Create Supabase record immediately
       fetch("/api/track/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -308,8 +334,6 @@ function TiffanyCall() {
         .catch(() => {});
 
       lastSentIdx.current = 0;
-
-      // Every 20s: send only NEW messages since last push
       trackInterval.current = setInterval(() => {
         if (!convoId.current || history.current.length <= lastSentIdx.current) return;
         const chunk = history.current.slice(lastSentIdx.current);
@@ -317,16 +341,14 @@ function TiffanyCall() {
         fetch("/api/track/update", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            conversationId: convoId.current,
-            stage: lastStage.current,
-            chunk,
-          }),
+          body: JSON.stringify({ conversationId: convoId.current, stage: lastStage.current, chunk }),
         }).catch(() => {});
       }, 20000);
 
       await speak(FIRST_MESSAGE);
-      voiceLoop();
+
+      // Start continuous recording (never stops until call ends)
+      recordLoop();
     } catch (err) {
       console.error("Failed to start:", err);
     }
@@ -336,13 +358,11 @@ function TiffanyCall() {
     running.current = false;
     cleanup();
 
-    // Stop tracking interval
     if (trackInterval.current) {
       clearInterval(trackInterval.current);
       trackInterval.current = null;
     }
 
-    // Send any remaining unsent messages + trigger Haiku NEPQ summary
     if (convoId.current) {
       const remainingChunk = history.current.slice(lastSentIdx.current);
       fetch("/api/track/end", {
