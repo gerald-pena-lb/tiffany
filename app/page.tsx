@@ -147,7 +147,7 @@ function TiffanyCall() {
           }
         } else if (hasSound) {
           if (!silenceStart) silenceStart = Date.now();
-          else if (Date.now() - silenceStart > 1100) {
+          else if (Date.now() - silenceStart > 2200) {
             recorder.stop();
             return;
           }
