@@ -105,6 +105,13 @@ function TiffanyCall() {
     const data = new Float32Array(analyser.current!.fftSize);
     let silenceStart: number | null = null;
     let hasSound = false;
+    let consecutiveLoudFrames = 0;
+    let totalSpeechFrames = 0;
+
+    // Require sustained speech (not just momentary noise) before activating
+    const SPEECH_THRESHOLD = 0.03; // higher = less sensitive to background
+    const MIN_CONSECUTIVE_FRAMES = 4; // ~4 frames at 60fps = ~67ms of sustained sound
+    const MIN_TOTAL_SPEECH_FRAMES = 15; // require ~250ms total speech for valid recording
 
     const check = () => {
       if (!running.current || recorder.state !== "recording") {
@@ -115,21 +122,39 @@ function TiffanyCall() {
       analyser.current!.getFloatTimeDomainData(data);
       const rms = Math.sqrt(data.reduce((s, v) => s + v * v, 0) / data.length);
 
-      if (rms > 0.012) {
-        hasSound = true;
-        silenceStart = null;
+      if (rms > SPEECH_THRESHOLD) {
+        consecutiveLoudFrames++;
+        totalSpeechFrames++;
 
-        // Interrupt Tiffany if she's speaking
-        if (audioEl.current && !audioEl.current.paused) {
-          audioEl.current.pause();
-          audioEl.current.currentTime = 0;
-          setIsSpeaking(false);
+        // Only register as "real speech" if sustained (filters out pops/clicks/short noises)
+        if (consecutiveLoudFrames >= MIN_CONSECUTIVE_FRAMES) {
+          hasSound = true;
+          silenceStart = null;
+
+          // Interrupt Tiffany if she's speaking
+          if (audioEl.current && !audioEl.current.paused) {
+            audioEl.current.pause();
+            audioEl.current.currentTime = 0;
+            setIsSpeaking(false);
+          }
         }
-      } else if (hasSound) {
-        if (!silenceStart) silenceStart = Date.now();
-        else if (Date.now() - silenceStart > 2200) {
-          recorder.stop();
-          return;
+      } else {
+        consecutiveLoudFrames = 0;
+        if (hasSound) {
+          if (!silenceStart) silenceStart = Date.now();
+          else if (Date.now() - silenceStart > 2200) {
+            // If very little actual speech was detected, treat as noise and discard
+            if (totalSpeechFrames < MIN_TOTAL_SPEECH_FRAMES) {
+              // Discard: reset and keep listening on same recorder
+              hasSound = false;
+              silenceStart = null;
+              totalSpeechFrames = 0;
+              requestAnimationFrame(check);
+              return;
+            }
+            recorder.stop();
+            return;
+          }
         }
       }
 
