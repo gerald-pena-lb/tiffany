@@ -41,6 +41,8 @@ function TiffanyCall() {
   const lastSentIdx = useRef(0);
   const lastStage = useRef(1);
   const didBook = useRef(false);
+  const calendlyShown = useRef(false);
+  const calendlyClosedWithoutBooking = useRef(false);
 
   useEffect(() => () => { running.current = false; cleanup(); }, []);
 
@@ -166,6 +168,25 @@ function TiffanyCall() {
 
   // ---- Process a recorded blob ----
 
+  // Simple similarity check: returns true if new message is likely a repeat of old
+  function isRepeat(newText: string, oldText: string): boolean {
+    if (!oldText) return false;
+    const normalize = (s: string) =>
+      s.toLowerCase().replace(/[^a-z0-9 ]/g, "").split(/\s+/).filter(Boolean);
+    const newWords = normalize(newText);
+    const oldWords = normalize(oldText);
+    if (newWords.length === 0) return false;
+
+    // If new message is much shorter than old, not a repeat (could be continuation)
+    if (newWords.length < oldWords.length * 0.5) return false;
+
+    // Count overlap
+    const oldSet = new Set(oldWords);
+    const matches = newWords.filter((w) => oldSet.has(w)).length;
+    const similarity = matches / Math.max(newWords.length, oldWords.length);
+    return similarity >= 0.75;
+  }
+
   async function processBlob(blob: Blob) {
     // If already processing, queue this blob (latest wins)
     if (processing.current) {
@@ -184,9 +205,40 @@ function TiffanyCall() {
         return;
       }
 
-      // Add to history
-      history.current.push({ role: "user", content: text });
-      setMessages((m) => [...m, { role: "user", message: text }]);
+      // Duplicate detection
+      const lastMsg = history.current[history.current.length - 1];
+      const lastUserMsg = [...history.current].reverse().find((m) => m.role === "user");
+
+      if (lastMsg?.role === "user") {
+        // Tiffany hasn't responded yet — merge with the previous user message
+        if (isRepeat(text, lastMsg.content)) {
+          // Just a repeat — skip entirely
+          processing.current = false;
+          processPending();
+          return;
+        } else {
+          // Merge the two user messages into one
+          lastMsg.content = `${lastMsg.content} ${text}`;
+          setMessages((m) => {
+            const copy = [...m];
+            const lastUserIdx = [...copy].reverse().findIndex((msg) => msg.role === "user");
+            if (lastUserIdx !== -1) {
+              const idx = copy.length - 1 - lastUserIdx;
+              copy[idx] = { ...copy[idx], message: `${copy[idx].message} ${text}` };
+            }
+            return copy;
+          });
+        }
+      } else if (lastUserMsg && isRepeat(text, lastUserMsg.content)) {
+        // Tiffany already responded but user is repeating — skip, no need to re-respond
+        processing.current = false;
+        processPending();
+        return;
+      } else {
+        // Normal new user message
+        history.current.push({ role: "user", content: text });
+        setMessages((m) => [...m, { role: "user", message: text }]);
+      }
 
       // Get Claude's response
       const response = await chat();
@@ -269,7 +321,9 @@ function TiffanyCall() {
       }
 
       if (toolName === "show_calendly") {
-        didBook.current = true;
+        // Always show when Claude calls the tool — Claude is now responsible for deciding when to reopen
+        calendlyShown.current = true;
+        calendlyClosedWithoutBooking.current = false;
         setShowCalendly(true);
       }
 
@@ -348,6 +402,8 @@ function TiffanyCall() {
       setMessages([{ role: "ai", message: FIRST_MESSAGE }]);
       lastStage.current = 1;
       didBook.current = false;
+      calendlyShown.current = false;
+      calendlyClosedWithoutBooking.current = false;
 
       fetch("/api/track/start", {
         method: "POST",
@@ -447,6 +503,9 @@ function TiffanyCall() {
           onBooked={async () => {
             setShowCalendly(false);
             didBook.current = true;
+            calendlyClosedWithoutBooking.current = false;
+            // Inject system context so Claude knows the booking was confirmed
+            history.current.push({ role: "user", content: "[System: Calendly booking confirmed]" });
             const msg = firstName
               ? `You're all set, ${firstName}. Before that call, I'll send you our latest book with case studies. Set aside 30 minutes to go through it. And send Alinka a few notes about your story so she's prepared. It was great talking with you.`
               : `You're all set. Before that call, I'll send you our latest book with case studies. Set aside 30 minutes to go through it. And send Alinka a few notes about your story so she's prepared. It was great talking with you.`;
@@ -454,7 +513,34 @@ function TiffanyCall() {
             setMessages((m) => [...m, { role: "ai", message: msg }]);
             await speak(msg);
           }}
-          onClose={() => setShowCalendly(false)}
+          onClose={() => {
+            setShowCalendly(false);
+            // If they closed without booking, inject system context so Claude asks them about it
+            if (!didBook.current) {
+              calendlyClosedWithoutBooking.current = true;
+              history.current.push({
+                role: "user",
+                content: "[System: Calendly popup was closed without a booking]",
+              });
+              // Trigger Tiffany to ask about it
+              (async () => {
+                if (processing.current) return;
+                processing.current = true;
+                try {
+                  const response = await chat();
+                  if (response && running.current) {
+                    history.current.push({ role: "assistant", content: response });
+                    setMessages((m) => [...m, { role: "ai", message: response }]);
+                    await speak(response);
+                  }
+                } catch (err) {
+                  console.error(err);
+                }
+                processing.current = false;
+                processPending();
+              })();
+            }
+          }}
         />
       )}
     </div>
