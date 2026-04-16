@@ -382,21 +382,16 @@ function TiffanyCall() {
 
   async function handleStart() {
     try {
-      // Create and unlock AudioContext immediately in user gesture (tap)
-      // This is the ONLY thing that needs to happen before any async gap
-      const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
-      const silentBuf = ctx.createBuffer(1, 1, 22050);
-      const silentSrc = ctx.createBufferSource();
-      silentSrc.buffer = silentBuf;
-      silentSrc.connect(ctx.destination);
-      silentSrc.start();
-      await ctx.resume();
-      audioCtx.current = ctx;
-
-      // Request mic (may show permission dialog — AudioContext is already unlocked above)
+      // Request mic FIRST — this shows the permission dialog
       micStream.current = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
+
+      // Create AudioContext after mic is granted and resume it
+      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const ctx = new AudioCtx();
+      await ctx.resume();
+      audioCtx.current = ctx;
 
       const source = ctx.createMediaStreamSource(micStream.current);
       const anal = ctx.createAnalyser();
