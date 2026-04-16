@@ -338,6 +338,11 @@ function TiffanyCall() {
   async function speak(text: string): Promise<void> {
     setIsSpeaking(true);
     try {
+      // Ensure AudioContext is active (mobile browsers suspend it)
+      if (audioCtx.current?.state === "suspended") {
+        await audioCtx.current.resume().catch(() => {});
+      }
+
       const res = await fetch("/api/tts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -379,19 +384,28 @@ function TiffanyCall() {
 
   async function handleStart() {
     try {
+      // Create Audio element and AudioContext FIRST in the user gesture (tap) context
+      // Mobile Chrome blocks these if created after an async gap
+      const audio = new Audio();
+      audio.muted = true;
+      await audio.play().catch(() => {});
+      audio.muted = false;
+      audio.pause();
+      audioEl.current = audio;
+
+      const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+      await ctx.resume();
+      audioCtx.current = ctx;
+
+      // Now request mic (this may show a permission prompt, which is ok)
       micStream.current = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
 
-      audioEl.current = new Audio();
-
-      const ctx = new AudioContext();
-      await ctx.resume();
       const source = ctx.createMediaStreamSource(micStream.current);
       const anal = ctx.createAnalyser();
       anal.fftSize = 512;
       source.connect(anal);
-      audioCtx.current = ctx;
       analyser.current = anal;
 
       running.current = true;
