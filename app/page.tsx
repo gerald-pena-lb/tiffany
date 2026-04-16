@@ -112,9 +112,9 @@ function TiffanyCall() {
 
     // Require sustained speech (not just momentary noise) before activating
     // Keyboard clicks, tapping, etc. are sharp but brief — real speech is sustained and louder
-    const SPEECH_THRESHOLD = 0.045; // higher = less sensitive to keyboard/background noise
-    const MIN_CONSECUTIVE_FRAMES = 8; // ~130ms of sustained sound (filters out clicks/taps)
-    const MIN_TOTAL_SPEECH_FRAMES = 25; // require ~400ms total speech for valid recording
+    const SPEECH_THRESHOLD = 0.035; // filters keyboard noise but still picks up normal speech
+    const MIN_CONSECUTIVE_FRAMES = 6; // ~100ms of sustained sound (filters clicks/taps)
+    const MIN_TOTAL_SPEECH_FRAMES = 20; // require ~330ms total speech for valid recording
 
     const check = () => {
       if (!running.current || recorder.state !== "recording") {
@@ -385,20 +385,19 @@ function TiffanyCall() {
 
   async function handleStart() {
     try {
-      // Create Audio element and AudioContext FIRST in the user gesture (tap) context
-      // Mobile Chrome blocks these if created after an async gap
-      const audio = new Audio();
-      audio.muted = true;
-      await audio.play().catch(() => {});
-      audio.muted = false;
+      // Unlock audio playback on mobile — play a tiny silent WAV in the tap gesture
+      const audio = new Audio("data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=");
+      try { await audio.play(); } catch {}
       audio.pause();
+      audio.currentTime = 0;
       audioEl.current = audio;
 
+      // Create AudioContext in user gesture context
       const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
       await ctx.resume();
       audioCtx.current = ctx;
 
-      // Now request mic (this may show a permission prompt, which is ok)
+      // Request mic
       micStream.current = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
