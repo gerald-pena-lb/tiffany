@@ -111,9 +111,10 @@ function TiffanyCall() {
     let totalSpeechFrames = 0;
 
     // Require sustained speech (not just momentary noise) before activating
-    const SPEECH_THRESHOLD = 0.03; // higher = less sensitive to background
-    const MIN_CONSECUTIVE_FRAMES = 4; // ~4 frames at 60fps = ~67ms of sustained sound
-    const MIN_TOTAL_SPEECH_FRAMES = 15; // require ~250ms total speech for valid recording
+    // Keyboard clicks, tapping, etc. are sharp but brief — real speech is sustained and louder
+    const SPEECH_THRESHOLD = 0.045; // higher = less sensitive to keyboard/background noise
+    const MIN_CONSECUTIVE_FRAMES = 8; // ~130ms of sustained sound (filters out clicks/taps)
+    const MIN_TOTAL_SPEECH_FRAMES = 25; // require ~400ms total speech for valid recording
 
     const check = () => {
       if (!running.current || recorder.state !== "recording") {
