@@ -9,20 +9,20 @@ export default function TiffanyOrb({ isSpeaking, isConnected }: TiffanyOrbProps)
   const active = isConnected && isSpeaking;
 
   return (
-    <div className="relative flex items-center justify-center w-72 h-72">
+    <div className="relative flex items-center justify-center w-48 h-48 sm:w-72 sm:h-72">
       {/* Speaking solar flare surges */}
       {active && (
         <>
-          <div className="absolute w-44 h-44 rounded-full bg-gold/20 blur-2xl animate-surge-1" />
-          <div className="absolute w-40 h-40 rounded-full bg-amber-500/15 blur-2xl animate-surge-2" />
-          <div className="absolute w-48 h-48 rounded-full bg-yellow-400/10 blur-3xl animate-surge-3" />
-          <div className="absolute w-36 h-36 rounded-full bg-orange-400/15 blur-2xl animate-surge-4" />
+          <div className="absolute w-28 h-28 sm:w-44 sm:h-44 rounded-full bg-gold/20 blur-2xl animate-surge-1" />
+          <div className="absolute w-24 h-24 sm:w-40 sm:h-40 rounded-full bg-amber-500/15 blur-2xl animate-surge-2" />
+          <div className="absolute w-32 h-32 sm:w-48 sm:h-48 rounded-full bg-yellow-400/10 blur-3xl animate-surge-3" />
+          <div className="absolute w-22 h-22 sm:w-36 sm:h-36 rounded-full bg-orange-400/15 blur-2xl animate-surge-4" />
         </>
       )}
 
       {/* Ambient glow */}
       <div
-        className={`absolute w-52 h-52 rounded-full blur-3xl transition-all duration-700 ${
+        className={`absolute w-36 h-36 sm:w-52 sm:h-52 rounded-full blur-3xl transition-all duration-700 ${
           active
             ? "bg-gold/35 scale-110"
             : isConnected
@@ -33,7 +33,7 @@ export default function TiffanyOrb({ isSpeaking, isConnected }: TiffanyOrbProps)
 
       {/* Core sphere */}
       <div
-        className={`relative w-40 h-40 rounded-full transition-all duration-500 overflow-hidden ${
+        className={`relative w-28 h-28 sm:w-40 sm:h-40 rounded-full transition-all duration-500 overflow-hidden ${
           active
             ? "shadow-[0_0_100px_rgba(255,215,0,0.5),0_0_50px_rgba(212,175,55,0.4)] animate-glow-breathe"
             : isConnected
@@ -74,9 +74,9 @@ export default function TiffanyOrb({ isSpeaking, isConnected }: TiffanyOrbProps)
       {/* Expanding wave rings when speaking */}
       {active && (
         <>
-          <div className="absolute w-40 h-40 rounded-full border border-gold/25 animate-wave-1" />
-          <div className="absolute w-40 h-40 rounded-full border border-gold/15 animate-wave-2" />
-          <div className="absolute w-40 h-40 rounded-full border border-gold/10 animate-wave-3" />
+          <div className="absolute w-28 h-28 sm:w-40 sm:h-40 rounded-full border border-gold/25 animate-wave-1" />
+          <div className="absolute w-28 h-28 sm:w-40 sm:h-40 rounded-full border border-gold/15 animate-wave-2" />
+          <div className="absolute w-28 h-28 sm:w-40 sm:h-40 rounded-full border border-gold/10 animate-wave-3" />
         </>
       )}
     </div>

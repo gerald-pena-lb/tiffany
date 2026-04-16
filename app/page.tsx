@@ -467,13 +467,13 @@ function TiffanyCall() {
   }
 
   return (
-    <div className="min-h-screen bg-white flex flex-col items-center justify-center px-4 py-8">
+    <div className="min-h-screen bg-white flex flex-col items-center justify-center px-3 py-4 sm:px-4 sm:py-8">
       <TiffanyOrb isSpeaking={isSpeaking} isConnected={isConnected} />
 
       {!isConnected && (
-        <button onClick={handleStart} className="mt-10 flex flex-col items-center gap-3 group">
-          <div className="w-14 h-14 rounded-full border border-gold/40 flex items-center justify-center group-hover:border-gold group-hover:bg-gold/10 transition-all">
-            <svg className="w-6 h-6 text-gold/60 group-hover:text-gold transition-colors" fill="currentColor" viewBox="0 0 24 24">
+        <button onClick={handleStart} className="mt-6 sm:mt-10 flex flex-col items-center gap-2 sm:gap-3 group">
+          <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-full border border-gold/40 flex items-center justify-center group-hover:border-gold group-hover:bg-gold/10 transition-all">
+            <svg className="w-5 h-5 sm:w-6 sm:h-6 text-gold/60 group-hover:text-gold transition-colors" fill="currentColor" viewBox="0 0 24 24">
               <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-1-9c0-.55.45-1 1-1s1 .45 1 1v6c0 .55-.45 1-1 1s-1-.45-1-1V5z" />
               <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" />
             </svg>
@@ -483,7 +483,7 @@ function TiffanyCall() {
       )}
 
       {isConnected && (
-        <button onClick={handleEnd} className="mt-6 w-10 h-10 rounded-full border border-gray-300 flex items-center justify-center text-gray-400 hover:text-red-500 hover:border-red-400 transition-colors">
+        <button onClick={handleEnd} className="mt-4 sm:mt-6 w-10 h-10 rounded-full border border-gray-300 flex items-center justify-center text-gray-400 hover:text-red-500 hover:border-red-400 transition-colors">
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
           </svg>
@@ -491,7 +491,7 @@ function TiffanyCall() {
       )}
 
       {isConnected && (
-        <div className="w-full max-w-md mt-6">
+        <div className="w-full max-w-md mt-4 sm:mt-6 px-1">
           <Transcript messages={messages} />
         </div>
       )}
