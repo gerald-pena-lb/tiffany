@@ -29,7 +29,7 @@ function TiffanyCall() {
   const [isSpeaking, setIsSpeaking] = useState(false);
 
   const history = useRef<{ role: "user" | "assistant"; content: string }[]>([]);
-  const audioEl = useRef<HTMLAudioElement | null>(null);
+  const ttsSource = useRef<AudioBufferSourceNode | null>(null);
   const micStream = useRef<MediaStream | null>(null);
   const audioCtx = useRef<AudioContext | null>(null);
   const analyser = useRef<AnalyserNode | null>(null);
@@ -47,8 +47,8 @@ function TiffanyCall() {
   useEffect(() => () => { running.current = false; cleanup(); }, []);
 
   function cleanup() {
-    audioEl.current?.pause();
-    audioEl.current = null;
+    try { ttsSource.current?.stop(); } catch {}
+    ttsSource.current = null;
     micStream.current?.getTracks().forEach((t) => t.stop());
     micStream.current = null;
     audioCtx.current?.close().catch(() => {});
@@ -135,9 +135,9 @@ function TiffanyCall() {
           silenceStart = null;
 
           // Interrupt Tiffany if she's speaking
-          if (audioEl.current && !audioEl.current.paused) {
-            audioEl.current.pause();
-            audioEl.current.currentTime = 0;
+          if (ttsSource.current) {
+            try { ttsSource.current.stop(); } catch {}
+            ttsSource.current = null;
             setIsSpeaking(false);
           }
         }
@@ -334,13 +334,13 @@ function TiffanyCall() {
     }
   }
 
-  // ---- ElevenLabs TTS ----
+  // ---- ElevenLabs TTS (Web Audio API — no HTML Audio element) ----
 
   async function speak(text: string): Promise<void> {
+    if (!audioCtx.current) return;
     setIsSpeaking(true);
     try {
-      // Ensure AudioContext is active (mobile browsers suspend it)
-      if (audioCtx.current?.state === "suspended") {
+      if (audioCtx.current.state === "suspended") {
         await audioCtx.current.resume().catch(() => {});
       }
 
@@ -354,27 +354,24 @@ function TiffanyCall() {
         return;
       }
 
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
+      const arrayBuffer = await res.arrayBuffer();
+      const audioBuffer = await audioCtx.current.decodeAudioData(arrayBuffer);
 
       await new Promise<void>((resolve) => {
-        const a = audioEl.current || new Audio();
-        audioEl.current = a;
+        const source = audioCtx.current!.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(audioCtx.current!.destination);
 
         const done = () => {
           setIsSpeaking(false);
-          URL.revokeObjectURL(url);
-          a.onended = null;
-          a.onerror = null;
-          a.onpause = null;
+          ttsSource.current = null;
+          source.onended = null;
           resolve();
         };
 
-        a.onended = done;
-        a.onerror = done;
-        a.onpause = done;
-        a.src = url;
-        a.play().catch(done);
+        source.onended = done;
+        ttsSource.current = source;
+        source.start(0);
       });
     } catch {
       setIsSpeaking(false);
@@ -385,19 +382,18 @@ function TiffanyCall() {
 
   async function handleStart() {
     try {
-      // Unlock audio playback on mobile — play a tiny silent WAV in the tap gesture
-      const audio = new Audio("data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=");
-      try { await audio.play(); } catch {}
-      audio.pause();
-      audio.currentTime = 0;
-      audioEl.current = audio;
-
-      // Create AudioContext in user gesture context
+      // Create and unlock AudioContext immediately in user gesture (tap)
+      // This is the ONLY thing that needs to happen before any async gap
       const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+      const silentBuf = ctx.createBuffer(1, 1, 22050);
+      const silentSrc = ctx.createBufferSource();
+      silentSrc.buffer = silentBuf;
+      silentSrc.connect(ctx.destination);
+      silentSrc.start();
       await ctx.resume();
       audioCtx.current = ctx;
 
-      // Request mic
+      // Request mic (may show permission dialog — AudioContext is already unlocked above)
       micStream.current = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
