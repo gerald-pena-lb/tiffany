@@ -473,6 +473,7 @@ function TiffanyCall() {
 
   return (
     <div className="min-h-screen bg-white flex flex-col items-center justify-center px-3 py-4 sm:px-4 sm:py-8">
+      <p className="text-gold/70 text-xs sm:text-sm tracking-widest uppercase mb-4 sm:mb-6">Your Publishing Consultant</p>
       <TiffanyOrb isSpeaking={isSpeaking} isConnected={isConnected} />
 
       {!isConnected && (
@@ -495,11 +496,13 @@ function TiffanyCall() {
         </button>
       )}
 
+      {/* Transcript hidden for now
       {isConnected && (
         <div className="w-full max-w-md mt-4 sm:mt-6 px-1">
           <Transcript messages={messages} />
         </div>
       )}
+      */}
 
       {showCalendly && (
         <CalendlyEmbed
