@@ -18,6 +18,7 @@ interface Message {
 interface ChatRequest {
   messages: Message[];
   prospectName?: string;
+  demo?: boolean;
 }
 
 const SYSTEM_PROMPT = `You are a professional sales setter for a book publishing company based in Dubai. Your name is Tiffany. You speak with a neutral tone, neutral language, and a generic rate of speech at all times. Never sound rushed, never sound overly enthusiastic. Be calm, warm, and conversational — like a trusted advisor, not a salesperson.
@@ -181,14 +182,20 @@ export async function POST(request: Request) {
     cleaned.unshift({ role: "user", content: "." });
   }
 
+  let systemPrompt = SYSTEM_PROMPT;
+  if (body.prospectName) {
+    systemPrompt += `\n\nThe prospect's name is ${body.prospectName}. Use their first name naturally in conversation.`;
+  }
+  if (body.demo) {
+    systemPrompt += `\n\nDEMO MODE: You are being showcased at a live event. You already introduced yourself in the opening message. The person talking to you is testing you out — they may or may not be a real prospect. Treat them like a real prospect and run the NEPQ flow as normal, but be slightly more concise since this is a demo. If they ask meta questions about how you work or what you can do, answer honestly and briefly: you're an AI voice agent that qualifies publishing prospects using the NEPQ framework, handles objections, and books calls with Alinka. Then steer back to the demo call.`;
+  }
+
   const anthropicBody = {
     model: "claude-sonnet-4-6",
     max_tokens: 1024,
     temperature: 0.7,
     stream: true,
-    system: body.prospectName
-      ? `${SYSTEM_PROMPT}\n\nThe prospect's name is ${body.prospectName}. Use their first name naturally in conversation.`
-      : SYSTEM_PROMPT,
+    system: systemPrompt,
     messages: cleaned,
     tools: [
       {
