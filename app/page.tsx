@@ -21,7 +21,7 @@ function TiffanyCall() {
   })();
 
   const FIRST_MESSAGE = isDemo
-    ? "Hi, I'm Tiffany — I'm an AI-powered publishing consultant for Leaders Brands, based in Dubai. I qualify prospects through live voice conversations, handle objections, and book calls with our Co-Founder Alinka. Want to try a quick demo? Just talk to me like you would on a real call."
+    ? "Hi, I'm Tiffany — I'm an AI-powered publishing consultant for Leaders Brands. I qualify prospects through live voice conversations, handle objections, and book calls with our Co-Founder Alinka. Want to try a quick demo? Just talk to me like you would on a real call."
     : firstName
     ? `Hey ${firstName}. It's Tiffany, your publishing consultant. Welcome to the call. What was it about your conversation with our team on LinkedIn that caused you to want to dive in deeper with me today?`
     : "Hey. It's Tiffany, your publishing consultant. Welcome to the call. What was it about your conversation with our team on LinkedIn that caused you to want to dive in deeper with me today?";
