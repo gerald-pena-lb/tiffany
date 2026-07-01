@@ -1018,17 +1018,33 @@ function RoleplayTrainer() {
   }
 
   // ---- REPORT PHASE ----
+  const transcriptText = history.current
+    .map((m) => `${m.role === "assistant" ? "Prospect" : "Setter"}: ${m.content}`)
+    .join("\n\n");
+
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-start px-4 py-8">
       <div className="w-full max-w-2xl space-y-4">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between print:hidden">
           <h1 className="text-gray-800 text-2xl font-light">Coaching Report</h1>
-          <button
-            onClick={handleReset}
-            className="text-gray-500 hover:text-gray-800 text-sm transition-colors"
-          >
-            New Roleplay →
-          </button>
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => window.print()}
+              disabled={loadingReport}
+              className="text-gray-500 hover:text-gray-800 text-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+              </svg>
+              Save PDF
+            </button>
+            <button
+              onClick={handleReset}
+              className="text-gray-500 hover:text-gray-800 text-sm transition-colors"
+            >
+              New Roleplay →
+            </button>
+          </div>
         </div>
 
         {loadingReport ? (
@@ -1036,13 +1052,45 @@ function RoleplayTrainer() {
             <p className="text-gray-500 text-sm">Analyzing your call...</p>
           </div>
         ) : (
-          <div className="bg-white border border-gray-100 rounded-xl p-6 shadow-sm">
-            <pre className="text-gray-700 text-sm whitespace-pre-wrap font-sans leading-relaxed">
-              {report}
-            </pre>
+          <div id="printable-report" className="space-y-6">
+            <div className="print-only hidden print:block mb-6">
+              <h1 className="text-2xl font-light text-gray-800">NEPQ Roleplay — Coaching Report</h1>
+              <p className="text-xs text-gray-500 mt-1">Generated {new Date().toLocaleString()}</p>
+            </div>
+
+            <div className="bg-white border border-gray-100 rounded-xl p-6 shadow-sm print:shadow-none print:border-0 print:p-0">
+              <h2 className="text-gray-500 text-xs uppercase tracking-wider mb-3 print:mb-2">Prospect Persona</h2>
+              <p className="text-gray-700 text-sm leading-relaxed">{personaRef.current || "Not specified"}</p>
+              <p className="text-gray-400 text-xs mt-3">Mode: {modeRef.current}</p>
+            </div>
+
+            <div className="bg-white border border-gray-100 rounded-xl p-6 shadow-sm print:shadow-none print:border-0 print:p-0 print:break-inside-avoid">
+              <h2 className="text-gray-500 text-xs uppercase tracking-wider mb-3 print:mb-2">Analysis</h2>
+              <pre className="text-gray-700 text-sm whitespace-pre-wrap font-sans leading-relaxed">
+                {report}
+              </pre>
+            </div>
+
+            <div className="bg-white border border-gray-100 rounded-xl p-6 shadow-sm print:shadow-none print:border-0 print:p-0 print:break-before-page">
+              <h2 className="text-gray-500 text-xs uppercase tracking-wider mb-3 print:mb-2">Full Transcript</h2>
+              <pre className="text-gray-600 text-xs whitespace-pre-wrap font-sans leading-relaxed">
+                {transcriptText || "No conversation recorded."}
+              </pre>
+            </div>
           </div>
         )}
       </div>
+
+      <style jsx global>{`
+        @media print {
+          body {
+            background: white !important;
+          }
+          @page {
+            margin: 0.75in;
+          }
+        }
+      `}</style>
     </div>
   );
 }
