@@ -562,7 +562,487 @@ function TiffanyCall() {
 export default function Page() {
   return (
     <Suspense fallback={<div className="min-h-screen bg-white" />}>
-      <TiffanyCall />
+      <PageRouter />
     </Suspense>
+  );
+}
+
+function PageRouter() {
+  const searchParams = useSearchParams();
+  if (searchParams.has("train")) {
+    return <RoleplayTrainer />;
+  }
+  return <TiffanyCall />;
+}
+
+type Mode = "training" | "guided" | "hardcore";
+type Phase = "setup" | "active" | "report";
+
+const STAGE_NAMES = ["Connect", "Situation", "Problem", "Impact", "Wallet Test", "Book Call"];
+
+const MODE_HINTS: Record<Mode, string[]> = {
+  training: [
+    "Stage 1 — CONNECT: Establish rapport, transfer ownership. Ask what made them show up.",
+    "Stage 2 — SITUATION: Understand goals, current state, what they've tried.",
+    "Stage 3 — PROBLEM: Get them to articulate why staying where they are isn't acceptable.",
+    "Stage 4 — IMPACT: Surface the emotional cost of inaction. Don't rush.",
+    "Stage 5 — WALLET TEST: Qualify budget using the car dealership frame.",
+    "Stage 6 — BOOK CALL: Lock in the next step, tie back to their pain.",
+  ],
+  guided: [
+    "Ask open-ended questions. Let silence do the work.",
+    "Go deeper on emotion. What specifically? How long? What happens if nothing changes?",
+    "Use their exact words back to them.",
+    "Never pitch. Only ask questions.",
+    "Binary reframes: painful status quo vs. the natural next step.",
+    "Handle 'need to think about it' by asking what specifically they need to think through.",
+  ],
+  hardcore: [],
+};
+
+function RoleplayTrainer() {
+  const [phase, setPhase] = useState<Phase>("setup");
+  const [persona, setPersona] = useState("");
+  const [mode, setMode] = useState<Mode>("guided");
+  const [messages, setMessages] = useState<TranscriptMessage[]>([]);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [currentStage, setCurrentStage] = useState(1);
+  const [coachTip, setCoachTip] = useState<string | null>(null);
+  const [report, setReport] = useState<string>("");
+  const [loadingReport, setLoadingReport] = useState(false);
+
+  const history = useRef<{ role: "user" | "assistant"; content: string }[]>([]);
+  const ttsSource = useRef<AudioBufferSourceNode | null>(null);
+  const micStream = useRef<MediaStream | null>(null);
+  const audioCtx = useRef<AudioContext | null>(null);
+  const analyser = useRef<AnalyserNode | null>(null);
+  const running = useRef(false);
+  const processing = useRef(false);
+  const pendingBlob = useRef<Blob | null>(null);
+  const personaRef = useRef("");
+  const modeRef = useRef<Mode>("guided");
+
+  useEffect(() => () => { running.current = false; cleanupRoleplay(); }, []);
+
+  function cleanupRoleplay() {
+    try { ttsSource.current?.stop(); } catch {}
+    ttsSource.current = null;
+    micStream.current?.getTracks().forEach((t) => t.stop());
+    micStream.current = null;
+    audioCtx.current?.close().catch(() => {});
+    audioCtx.current = null;
+    analyser.current = null;
+  }
+
+  function getMime(): string {
+    const types = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus", ""];
+    for (const t of types) {
+      if (!t || MediaRecorder.isTypeSupported(t)) return t;
+    }
+    return "";
+  }
+
+  function recordLoop() {
+    if (!micStream.current || !running.current || !analyser.current) return;
+    if (audioCtx.current?.state === "suspended") audioCtx.current.resume();
+
+    const mime = getMime();
+    const recorder = new MediaRecorder(micStream.current, mime ? { mimeType: mime } : undefined);
+    const chunks: Blob[] = [];
+    recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+    recorder.onstop = () => {
+      if (!running.current) return;
+      const blob = chunks.length > 0 ? new Blob(chunks, { type: recorder.mimeType || "audio/webm" }) : null;
+      if (blob && blob.size > 500) processBlob(blob);
+      if (running.current) recordLoop();
+    };
+    recorder.start();
+
+    const data = new Float32Array(analyser.current!.fftSize);
+    let silenceStart: number | null = null;
+    let hasSound = false;
+    let consecutive = 0;
+    let total = 0;
+    const THRESHOLD = 0.035;
+    const MIN_CONSEC = 6;
+    const MIN_TOTAL = 20;
+
+    const check = () => {
+      if (!running.current || recorder.state !== "recording") {
+        if (recorder.state === "recording") recorder.stop();
+        return;
+      }
+      analyser.current!.getFloatTimeDomainData(data);
+      const rms = Math.sqrt(data.reduce((s, v) => s + v * v, 0) / data.length);
+      if (rms > THRESHOLD) {
+        consecutive++;
+        total++;
+        if (consecutive >= MIN_CONSEC) {
+          hasSound = true;
+          silenceStart = null;
+          if (ttsSource.current) {
+            try { ttsSource.current.stop(); } catch {}
+            ttsSource.current = null;
+            setIsSpeaking(false);
+          }
+        }
+      } else {
+        consecutive = 0;
+        if (hasSound) {
+          if (!silenceStart) silenceStart = Date.now();
+          else if (Date.now() - silenceStart > 2200) {
+            if (total < MIN_TOTAL) {
+              hasSound = false;
+              silenceStart = null;
+              total = 0;
+              requestAnimationFrame(check);
+              return;
+            }
+            recorder.stop();
+            return;
+          }
+        }
+      }
+      requestAnimationFrame(check);
+    };
+    requestAnimationFrame(check);
+  }
+
+  async function processBlob(blob: Blob) {
+    if (processing.current) {
+      pendingBlob.current = blob;
+      return;
+    }
+    processing.current = true;
+    try {
+      const form = new FormData();
+      form.append("audio", blob);
+      const sttRes = await fetch("/api/stt", { method: "POST", body: form });
+      if (!sttRes.ok) throw new Error("STT failed");
+      const { text } = await sttRes.json();
+      const userText = text?.trim();
+      if (!userText || !running.current) { processing.current = false; processPending(); return; }
+
+      history.current.push({ role: "user", content: userText });
+      setMessages((m) => [...m, { role: "user", message: userText }]);
+
+      const response = await chatRoleplay();
+      if (!running.current || !response) { processing.current = false; processPending(); return; }
+
+      history.current.push({ role: "assistant", content: response.spoken });
+      setMessages((m) => [...m, { role: "ai", message: response.spoken }]);
+
+      if (response.coach) {
+        setCoachTip(response.coach);
+        // Speak the coaching first
+        await speak(`Hold on. ${response.coach} Let's continue.`);
+        setCoachTip(null);
+      }
+      await speak(response.spoken);
+    } catch (err) {
+      console.error(err);
+    }
+    processing.current = false;
+    processPending();
+  }
+
+  function processPending() {
+    if (pendingBlob.current) {
+      const b = pendingBlob.current;
+      pendingBlob.current = null;
+      processBlob(b);
+    }
+  }
+
+  async function chatRoleplay(): Promise<{ spoken: string; coach: string | null } | null> {
+    try {
+      const res = await fetch("/api/roleplay", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: history.current,
+          persona: personaRef.current,
+          mode: modeRef.current,
+        }),
+      });
+      if (!res.ok) return null;
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let full = "", buf = "", coach: string | null = null;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split("\n");
+        buf = lines.pop() || "";
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          try {
+            const e = JSON.parse(line.slice(6));
+            if (e.type === "text") full += e.text;
+            else if (e.type === "stage") setCurrentStage(e.stage);
+            else if (e.type === "coach") coach = e.tip;
+          } catch { continue; }
+        }
+      }
+      const spoken = full
+        .replace(/\[COACH\][\s\S]*?\[\/COACH\]/g, "")
+        .replace(/\s*\[STAGE:\d\]\s*/g, "")
+        .trim();
+      return { spoken, coach };
+    } catch {
+      return null;
+    }
+  }
+
+  async function speak(text: string): Promise<void> {
+    if (!audioCtx.current || !text) return;
+    setIsSpeaking(true);
+    try {
+      if (audioCtx.current.state === "suspended") await audioCtx.current.resume().catch(() => {});
+      const res = await fetch("/api/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      if (!res.ok) { setIsSpeaking(false); return; }
+      const arrayBuffer = await res.arrayBuffer();
+      const audioBuffer = await audioCtx.current.decodeAudioData(arrayBuffer);
+      await new Promise<void>((resolve) => {
+        const src = audioCtx.current!.createBufferSource();
+        src.buffer = audioBuffer;
+        src.connect(audioCtx.current!.destination);
+        const done = () => { setIsSpeaking(false); ttsSource.current = null; src.onended = null; resolve(); };
+        src.onended = done;
+        ttsSource.current = src;
+        src.start(0);
+      });
+    } catch {
+      setIsSpeaking(false);
+    }
+  }
+
+  async function handleStartRoleplay() {
+    if (!persona.trim()) return;
+    personaRef.current = persona.trim();
+    modeRef.current = mode;
+
+    try {
+      micStream.current = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      });
+      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const ctx = new AudioCtx();
+      await ctx.resume();
+      audioCtx.current = ctx;
+      const source = ctx.createMediaStreamSource(micStream.current);
+      const anal = ctx.createAnalyser();
+      anal.fftSize = 512;
+      source.connect(anal);
+      analyser.current = anal;
+
+      running.current = true;
+      processing.current = false;
+      pendingBlob.current = null;
+      history.current = [];
+      setMessages([]);
+      setCurrentStage(1);
+      setCoachTip(null);
+      setPhase("active");
+
+      // Prospect opens with something short and neutral — like picking up a call
+      const opener = "Hey. Yeah, this is me. Who's this?";
+      history.current.push({ role: "assistant", content: opener });
+      setMessages([{ role: "ai", message: opener }]);
+      await speak(opener);
+      recordLoop();
+    } catch (err) {
+      console.error("Failed to start roleplay:", err);
+    }
+  }
+
+  async function handleEndRoleplay() {
+    running.current = false;
+    cleanupRoleplay();
+    setPhase("report");
+    setLoadingReport(true);
+
+    const transcript = history.current
+      .map((m) => `${m.role === "assistant" ? "Prospect" : "Setter"}: ${m.content}`)
+      .join("\n\n");
+
+    try {
+      const res = await fetch("/api/roleplay/report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ transcript, persona: personaRef.current }),
+      });
+      const data = await res.json();
+      setReport(data.report || "Failed to generate report.");
+    } catch {
+      setReport("Failed to generate report.");
+    }
+    setLoadingReport(false);
+  }
+
+  function handleReset() {
+    setPhase("setup");
+    setPersona("");
+    setMessages([]);
+    setReport("");
+    setCurrentStage(1);
+    setCoachTip(null);
+    history.current = [];
+  }
+
+  // ---- SETUP PHASE ----
+  if (phase === "setup") {
+    return (
+      <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center px-4 py-8">
+        <div className="w-full max-w-lg space-y-6">
+          <div className="text-center">
+            <h1 className="text-gray-800 text-2xl font-light">NEPQ Roleplay Trainer</h1>
+            <p className="text-gray-500 text-sm mt-2">Practice as the setter. Tiffany plays the prospect.</p>
+          </div>
+
+          <div className="bg-white border border-gray-100 rounded-xl p-5 shadow-sm space-y-4">
+            <div>
+              <label className="text-gray-600 text-xs uppercase tracking-wider mb-2 block">Prospect Persona</label>
+              <textarea
+                value={persona}
+                onChange={(e) => setPersona(e.target.value)}
+                placeholder="e.g. Sarah, 48, founder of a wellness clinic in Toronto. Has been thinking about writing a book on gut health for 4 years. Never took action. Skeptical of publishing companies after bad experience with a vanity press. Budget-conscious. Married, husband is supportive but cautious with money."
+                className="w-full h-32 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-gray-700 text-sm focus:outline-none focus:border-gold/50 resize-none"
+              />
+            </div>
+
+            <div>
+              <label className="text-gray-600 text-xs uppercase tracking-wider mb-2 block">Difficulty</label>
+              <div className="grid grid-cols-3 gap-2">
+                {([
+                  { key: "training", title: "Training Wheels", desc: "Stage shown + live coaching" },
+                  { key: "guided", title: "Guided", desc: "Subtle hints during call" },
+                  { key: "hardcore", title: "Hardcore", desc: "No help. Real difficulty." },
+                ] as { key: Mode; title: string; desc: string }[]).map((m) => (
+                  <button
+                    key={m.key}
+                    onClick={() => setMode(m.key)}
+                    className={`p-3 rounded-lg border text-left transition-colors ${
+                      mode === m.key
+                        ? "border-gold bg-gold/5"
+                        : "border-gray-200 hover:border-gray-300"
+                    }`}
+                  >
+                    <p className="text-gray-800 text-sm font-medium">{m.title}</p>
+                    <p className="text-gray-400 text-[10px] mt-1 leading-tight">{m.desc}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <button
+            onClick={handleStartRoleplay}
+            disabled={!persona.trim()}
+            className="w-full bg-gold/90 hover:bg-gold disabled:bg-gray-200 disabled:cursor-not-allowed rounded-lg px-4 py-3 text-white text-sm transition-colors shadow-sm"
+          >
+            Start Roleplay
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ---- ACTIVE CALL PHASE ----
+  if (phase === "active") {
+    const hints = MODE_HINTS[mode];
+    const currentHint = hints[Math.min(currentStage - 1, hints.length - 1)];
+
+    return (
+      <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-start px-4 py-6">
+        {mode === "training" && (
+          <div className="w-full max-w-lg mb-4">
+            <div className="bg-white border border-gray-100 rounded-lg p-3 shadow-sm">
+              <p className="text-gray-400 text-[10px] uppercase tracking-wider mb-1">Current Stage</p>
+              <div className="flex gap-1">
+                {STAGE_NAMES.map((name, i) => (
+                  <div
+                    key={name}
+                    className={`flex-1 text-center py-1 text-[10px] rounded ${
+                      i + 1 === currentStage
+                        ? "bg-gold/20 text-gold font-medium"
+                        : i + 1 < currentStage
+                        ? "bg-gray-100 text-gray-400"
+                        : "text-gray-300"
+                    }`}
+                  >
+                    {name}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        <TiffanyOrb isSpeaking={isSpeaking} isConnected={true} />
+
+        {coachTip && (
+          <div className="w-full max-w-lg mt-4 bg-gold/10 border border-gold/30 rounded-lg p-3">
+            <p className="text-gold text-[10px] uppercase tracking-wider mb-1">Coach</p>
+            <p className="text-gray-700 text-sm">{coachTip}</p>
+          </div>
+        )}
+
+        {(mode === "training" || mode === "guided") && currentHint && !coachTip && (
+          <div className="w-full max-w-lg mt-4 bg-white border border-gray-100 rounded-lg p-3 shadow-sm">
+            <p className="text-gray-400 text-[10px] uppercase tracking-wider mb-1">Prompt</p>
+            <p className="text-gray-600 text-xs leading-relaxed">{currentHint}</p>
+          </div>
+        )}
+
+        <button
+          onClick={handleEndRoleplay}
+          className="mt-6 w-10 h-10 rounded-full border border-gray-300 flex items-center justify-center text-gray-400 hover:text-red-500 hover:border-red-400 transition-colors"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+
+        <div className="w-full max-w-md mt-6">
+          <Transcript messages={messages} />
+        </div>
+      </div>
+    );
+  }
+
+  // ---- REPORT PHASE ----
+  return (
+    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-start px-4 py-8">
+      <div className="w-full max-w-2xl space-y-4">
+        <div className="flex items-center justify-between">
+          <h1 className="text-gray-800 text-2xl font-light">Coaching Report</h1>
+          <button
+            onClick={handleReset}
+            className="text-gray-500 hover:text-gray-800 text-sm transition-colors"
+          >
+            New Roleplay →
+          </button>
+        </div>
+
+        {loadingReport ? (
+          <div className="bg-white border border-gray-100 rounded-xl p-8 shadow-sm text-center">
+            <p className="text-gray-500 text-sm">Analyzing your call...</p>
+          </div>
+        ) : (
+          <div className="bg-white border border-gray-100 rounded-xl p-6 shadow-sm">
+            <pre className="text-gray-700 text-sm whitespace-pre-wrap font-sans leading-relaxed">
+              {report}
+            </pre>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
