@@ -811,6 +811,13 @@ function RoleplayTrainer() {
       const spoken = full
         .replace(/\[COACH\][\s\S]*?\[\/COACH\]/g, "")
         .replace(/\s*\[STAGE:\d\]\s*/g, "")
+        .replace(/\*[^*\n]{1,80}\*/g, "")
+        .replace(/\([^)\n]{1,80}\)/g, (match) => {
+          const inner = match.slice(1, -1).trim().toLowerCase();
+          const isAction = /^(pause|slight pause|small pause|laugh|laughs|laughing|small laugh|chuckle|chuckles|sigh|sighs|sighing|thinking|beat|silence|clears throat|breath|breathes|smile|smiles|smiling|nod|nods|nodding)( |,|\.|$)/.test(inner);
+          return isAction ? "" : match;
+        })
+        .replace(/\s+/g, " ")
         .trim();
       return { spoken, coach };
     } catch {
