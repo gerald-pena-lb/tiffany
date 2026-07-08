@@ -610,6 +610,7 @@ function RoleplayTrainer() {
   const [coachTip, setCoachTip] = useState<string | null>(null);
   const [report, setReport] = useState<string>("");
   const [loadingReport, setLoadingReport] = useState(false);
+  const [coachModeActive, setCoachModeActive] = useState(false);
 
   const history = useRef<{ role: "user" | "assistant"; content: string }[]>([]);
   const ttsSource = useRef<AudioBufferSourceNode | null>(null);
@@ -621,6 +622,18 @@ function RoleplayTrainer() {
   const pendingBlob = useRef<Blob | null>(null);
   const personaRef = useRef("");
   const modeRef = useRef<Mode>("guided");
+  const coachModeRef = useRef(false);
+
+  function isBreakCharacterPhrase(text: string): boolean {
+    const normalized = text.toLowerCase().replace(/[^a-z ]/g, "").trim();
+    return (
+      /\benough tiffany\b/.test(normalized) ||
+      /\benough tiff\b/.test(normalized) ||
+      /\bstop tiffany\b/.test(normalized) ||
+      /\bpause tiffany\b/.test(normalized) ||
+      /\bbreak character\b/.test(normalized)
+    );
+  }
 
   useEffect(() => () => { running.current = false; cleanupRoleplay(); }, []);
 
@@ -723,6 +736,14 @@ function RoleplayTrainer() {
       const userText = text?.trim();
       if (!userText || !running.current) { processing.current = false; processPending(); return; }
 
+      // Detect break-character trigger phrase
+      const triggeringCoachMode = !coachModeRef.current && isBreakCharacterPhrase(userText);
+      if (triggeringCoachMode) {
+        coachModeRef.current = true;
+        setCoachModeActive(true);
+        setCoachTip(null);
+      }
+
       history.current.push({ role: "user", content: userText });
       setMessages((m) => [...m, { role: "user", message: userText }]);
 
@@ -732,7 +753,7 @@ function RoleplayTrainer() {
       history.current.push({ role: "assistant", content: response.spoken });
       setMessages((m) => [...m, { role: "ai", message: response.spoken }]);
 
-      if (response.coach) {
+      if (response.coach && !coachModeRef.current) {
         setCoachTip(response.coach);
         // Speak the coaching first
         await speak(`Hold on. ${response.coach} Let's continue.`);
@@ -763,6 +784,7 @@ function RoleplayTrainer() {
           messages: history.current,
           persona: personaRef.current,
           mode: modeRef.current,
+          coachMode: coachModeRef.current,
         }),
       });
       if (!res.ok) return null;
@@ -845,6 +867,8 @@ function RoleplayTrainer() {
       running.current = true;
       processing.current = false;
       pendingBlob.current = null;
+      coachModeRef.current = false;
+      setCoachModeActive(false);
       history.current = [];
       setMessages([]);
       setCurrentStage(1);
@@ -893,6 +917,8 @@ function RoleplayTrainer() {
     setReport("");
     setCurrentStage(1);
     setCoachTip(null);
+    coachModeRef.current = false;
+    setCoachModeActive(false);
     history.current = [];
   }
 
@@ -961,7 +987,16 @@ function RoleplayTrainer() {
 
     return (
       <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-start px-4 py-6">
-        {mode === "training" && (
+        {coachModeActive ? (
+          <div className="w-full max-w-lg mb-4">
+            <div className="bg-gold/10 border border-gold/30 rounded-lg p-3">
+              <p className="text-gold text-[10px] uppercase tracking-wider mb-1">Coach Mode</p>
+              <p className="text-gray-700 text-xs leading-relaxed">
+                Tiffany is out of character. Ask her about the call, or how she works as an AI.
+              </p>
+            </div>
+          </div>
+        ) : mode === "training" ? (
           <div className="w-full max-w-lg mb-4">
             <div className="bg-white border border-gray-100 rounded-lg p-3 shadow-sm">
               <p className="text-gray-400 text-[10px] uppercase tracking-wider mb-1">Current Stage</p>
@@ -983,22 +1018,28 @@ function RoleplayTrainer() {
               </div>
             </div>
           </div>
-        )}
+        ) : null}
 
         <TiffanyOrb isSpeaking={isSpeaking} isConnected={true} />
 
-        {coachTip && (
+        {coachTip && !coachModeActive && (
           <div className="w-full max-w-lg mt-4 bg-gold/10 border border-gold/30 rounded-lg p-3">
             <p className="text-gold text-[10px] uppercase tracking-wider mb-1">Coach</p>
             <p className="text-gray-700 text-sm">{coachTip}</p>
           </div>
         )}
 
-        {(mode === "training" || mode === "guided") && currentHint && !coachTip && (
+        {!coachModeActive && (mode === "training" || mode === "guided") && currentHint && !coachTip && (
           <div className="w-full max-w-lg mt-4 bg-white border border-gray-100 rounded-lg p-3 shadow-sm">
             <p className="text-gray-400 text-[10px] uppercase tracking-wider mb-1">Prompt</p>
             <p className="text-gray-600 text-xs leading-relaxed">{currentHint}</p>
           </div>
+        )}
+
+        {!coachModeActive && (
+          <p className="text-gray-400 text-[10px] mt-3 italic">
+            Say &quot;that&apos;s enough Tiffany&quot; to break character
+          </p>
         )}
 
         <button
