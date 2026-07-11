@@ -1257,6 +1257,8 @@ function InterviewSimulator() {
   const [report, setReport] = useState("");
   const [reportScore, setReportScore] = useState<number | null>(null);
   const [loadingReport, setLoadingReport] = useState(false);
+  const [starting, setStarting] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
 
   const history = useRef<{ role: "user" | "assistant"; content: string }[]>([]);
   const ttsSource = useRef<AudioBufferSourceNode | null>(null);
@@ -1469,12 +1471,18 @@ function InterviewSimulator() {
   }
 
   async function handleStart() {
-    if (!jobDescription.trim() || !resume.trim()) return;
+    if (!jobDescription.trim() || !resume.trim() || starting) return;
+    setStarting(true);
+    setStartError(null);
     jdRef.current = jobDescription.trim();
     resumeRef.current = resume.trim();
     nameRef.current = candidateName.trim();
 
     try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error("Microphone not available in this browser. Try Chrome or Safari.");
+      }
+
       micStream.current = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
@@ -1496,6 +1504,7 @@ function InterviewSimulator() {
       setReport("");
       setReportScore(null);
       setPhase("active");
+      setStarting(false);
 
       const opener = candidateName
         ? `Hi ${candidateName.split(" ")[0]}, thanks for joining. I'm going to take you through some questions today to get a better sense of your background and see how you'd fit for this role. Whenever you're ready, why don't you start by walking me through your background?`
@@ -1506,6 +1515,14 @@ function InterviewSimulator() {
       recordLoop();
     } catch (err) {
       console.error("Failed to start interview:", err);
+      const msg = err instanceof Error ? err.message : String(err);
+      const friendly = /permission|denied|notallowed/i.test(msg)
+        ? "Microphone permission was denied. Enable mic access for this site in your browser settings and try again."
+        : /notfound|no.*device/i.test(msg)
+        ? "No microphone found. Connect a mic and try again."
+        : msg || "Failed to start. Please try again.";
+      setStartError(friendly);
+      setStarting(false);
     }
   }
 
@@ -1550,58 +1567,81 @@ function InterviewSimulator() {
   // ---- SETUP PHASE ----
   if (phase === "setup") {
     return (
-      <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center px-4 py-8">
-        <div className="w-full max-w-2xl space-y-6">
+      <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-start sm:justify-center px-3 sm:px-4 py-6 sm:py-8">
+        <div className="w-full max-w-2xl space-y-4 sm:space-y-6">
           <div className="text-center">
-            <h1 className="text-gray-800 text-2xl font-light">Interview Simulator</h1>
-            <p className="text-gray-500 text-sm mt-2">Paste a job description and your resume. Tiffany will interview you.</p>
+            <h1 className="text-gray-800 text-xl sm:text-2xl font-light">Interview Simulator</h1>
+            <p className="text-gray-500 text-xs sm:text-sm mt-1 sm:mt-2 px-2">
+              Paste a job description and your resume. Tiffany will interview you.
+            </p>
           </div>
 
-          <div className="bg-white border border-gray-100 rounded-xl p-5 shadow-sm space-y-4">
+          <div className="bg-white border border-gray-100 rounded-xl p-4 sm:p-5 shadow-sm space-y-3 sm:space-y-4">
             <div>
-              <label className="text-gray-600 text-xs uppercase tracking-wider mb-2 block">
+              <label className="text-gray-600 text-[10px] sm:text-xs uppercase tracking-wider mb-1.5 sm:mb-2 block">
                 Your Name <span className="text-gray-300 normal-case">(optional)</span>
               </label>
               <input
                 type="text"
                 value={candidateName}
-                onChange={(e) => setCandidateName(e.target.value)}
+                onChange={(e) => { setCandidateName(e.target.value); setStartError(null); }}
                 placeholder="e.g. Alex Chen"
                 className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-gray-700 text-sm focus:outline-none focus:border-gold/50"
               />
             </div>
 
             <div>
-              <label className="text-gray-600 text-xs uppercase tracking-wider mb-2 block">Job Description</label>
+              <label className="text-gray-600 text-[10px] sm:text-xs uppercase tracking-wider mb-1.5 sm:mb-2 block">
+                Job Description
+              </label>
               <textarea
                 value={jobDescription}
-                onChange={(e) => setJobDescription(e.target.value)}
+                onChange={(e) => { setJobDescription(e.target.value); setStartError(null); }}
                 placeholder="Paste the full job description here — role, responsibilities, required skills, qualifications..."
-                className="w-full h-40 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-gray-700 text-sm focus:outline-none focus:border-gold/50 resize-none"
+                className="w-full h-32 sm:h-40 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-gray-700 text-sm focus:outline-none focus:border-gold/50 resize-none"
               />
             </div>
 
             <div>
-              <label className="text-gray-600 text-xs uppercase tracking-wider mb-2 block">Your Resume</label>
+              <label className="text-gray-600 text-[10px] sm:text-xs uppercase tracking-wider mb-1.5 sm:mb-2 block">
+                Your Resume
+              </label>
               <textarea
                 value={resume}
-                onChange={(e) => setResume(e.target.value)}
+                onChange={(e) => { setResume(e.target.value); setStartError(null); }}
                 placeholder="Paste your resume as plain text — experience, education, skills, achievements..."
-                className="w-full h-40 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-gray-700 text-sm focus:outline-none focus:border-gold/50 resize-none"
+                className="w-full h-32 sm:h-40 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-gray-700 text-sm focus:outline-none focus:border-gold/50 resize-none"
               />
             </div>
           </div>
 
+          {startError && (
+            <div className="bg-red-50 border border-red-200 rounded-lg px-3 sm:px-4 py-2 sm:py-3">
+              <p className="text-red-700 text-xs sm:text-sm">{startError}</p>
+            </div>
+          )}
+
           <button
+            type="button"
             onClick={handleStart}
-            disabled={!jobDescription.trim() || !resume.trim()}
-            className="w-full bg-gold/90 hover:bg-gold disabled:bg-gray-200 disabled:cursor-not-allowed rounded-lg px-4 py-3 text-white text-sm transition-colors shadow-sm"
+            disabled={!jobDescription.trim() || !resume.trim() || starting}
+            className="w-full bg-gold/90 hover:bg-gold active:bg-gold disabled:bg-gray-200 disabled:cursor-not-allowed rounded-lg px-4 py-3 text-white text-sm transition-colors shadow-sm flex items-center justify-center gap-2"
           >
-            Start Interview
+            {starting ? (
+              <>
+                <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                Requesting mic...
+              </>
+            ) : (
+              "Start Interview"
+            )}
           </button>
 
-          <p className="text-center text-xs text-gray-400">
-            Voice interview. Answer as you would in real life. Assessment generated when you end.
+          <p className="text-center text-[10px] sm:text-xs text-gray-400 px-2">
+            Voice interview. Grant mic access when prompted. Assessment generated when you end.
           </p>
         </div>
       </div>
@@ -1611,21 +1651,21 @@ function InterviewSimulator() {
   // ---- ACTIVE PHASE ----
   if (phase === "active") {
     return (
-      <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center px-4 py-6">
-        <p className="text-gray-500 text-xs tracking-widest uppercase mb-4">Mock Interview</p>
+      <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center px-3 sm:px-4 py-4 sm:py-6">
+        <p className="text-gray-500 text-[10px] sm:text-xs tracking-widest uppercase mb-3 sm:mb-4">Mock Interview</p>
         <TiffanyOrb isSpeaking={isSpeaking} isConnected={true} />
 
         <button
           onClick={handleEnd}
-          className="mt-8 w-10 h-10 rounded-full border border-gray-300 flex items-center justify-center text-gray-400 hover:text-red-500 hover:border-red-400 transition-colors"
+          className="mt-6 sm:mt-8 w-10 h-10 rounded-full border border-gray-300 flex items-center justify-center text-gray-400 hover:text-red-500 hover:border-red-400 transition-colors"
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
           </svg>
         </button>
 
-        <p className="text-gray-400 text-[10px] mt-4 italic">
-          Click X when done to end and get your assessment.
+        <p className="text-gray-400 text-[10px] mt-3 sm:mt-4 italic text-center px-4">
+          Tap the X when done to end and get your assessment.
         </p>
       </div>
     );
@@ -1637,36 +1677,37 @@ function InterviewSimulator() {
     .join("\n\n");
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-start px-4 py-8">
+    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-start px-3 sm:px-4 py-4 sm:py-8">
       <div className="w-full max-w-2xl space-y-4">
-        <div className="flex items-center justify-between print:hidden">
-          <h1 className="text-gray-800 text-2xl font-light">Interview Assessment</h1>
-          <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 print:hidden">
+          <h1 className="text-gray-800 text-xl sm:text-2xl font-light">Interview Assessment</h1>
+          <div className="flex items-center gap-3 sm:gap-4">
             <button
               onClick={() => window.print()}
               disabled={loadingReport}
-              className="text-gray-500 hover:text-gray-800 text-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
+              className="text-gray-500 hover:text-gray-800 text-xs sm:text-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
               </svg>
-              Save PDF
+              <span className="hidden sm:inline">Save PDF</span>
+              <span className="sm:hidden">PDF</span>
             </button>
             <button
               onClick={handleReset}
-              className="text-gray-500 hover:text-gray-800 text-sm transition-colors"
+              className="text-gray-500 hover:text-gray-800 text-xs sm:text-sm transition-colors"
             >
-              New Interview →
+              New <span className="hidden sm:inline">Interview</span> →
             </button>
           </div>
         </div>
 
         {loadingReport ? (
-          <div className="bg-white border border-gray-100 rounded-xl p-8 shadow-sm text-center">
+          <div className="bg-white border border-gray-100 rounded-xl p-6 sm:p-8 shadow-sm text-center">
             <p className="text-gray-500 text-sm">Analyzing your interview...</p>
           </div>
         ) : (
-          <div id="printable-interview-report" className="space-y-6">
+          <div id="printable-interview-report" className="space-y-4 sm:space-y-6">
             <div className="hidden print:block mb-6">
               <h1 className="text-2xl font-light text-gray-800">Interview Assessment</h1>
               <p className="text-xs text-gray-500 mt-1">
@@ -1675,15 +1716,15 @@ function InterviewSimulator() {
               </p>
             </div>
 
-            <div className="bg-white border border-gray-100 rounded-xl p-6 shadow-sm print:shadow-none print:border-0 print:p-0 print:break-inside-avoid">
-              <pre className="text-gray-700 text-sm whitespace-pre-wrap font-sans leading-relaxed">
+            <div className="bg-white border border-gray-100 rounded-xl p-4 sm:p-6 shadow-sm print:shadow-none print:border-0 print:p-0 print:break-inside-avoid">
+              <pre className="text-gray-700 text-xs sm:text-sm whitespace-pre-wrap font-sans leading-relaxed">
                 {report}
               </pre>
             </div>
 
-            <div className="bg-white border border-gray-100 rounded-xl p-6 shadow-sm print:shadow-none print:border-0 print:p-0 print:break-before-page">
-              <h2 className="text-gray-500 text-xs uppercase tracking-wider mb-3">Full Transcript</h2>
-              <pre className="text-gray-600 text-xs whitespace-pre-wrap font-sans leading-relaxed">
+            <div className="bg-white border border-gray-100 rounded-xl p-4 sm:p-6 shadow-sm print:shadow-none print:border-0 print:p-0 print:break-before-page">
+              <h2 className="text-gray-500 text-[10px] sm:text-xs uppercase tracking-wider mb-2 sm:mb-3">Full Transcript</h2>
+              <pre className="text-gray-600 text-[11px] sm:text-xs whitespace-pre-wrap font-sans leading-relaxed">
                 {transcriptText || "No conversation recorded."}
               </pre>
             </div>
