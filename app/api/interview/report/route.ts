@@ -31,8 +31,24 @@ Produce a detailed written assessment in this EXACT markdown format. Quote speci
 - 3-5 specific weaknesses. Quote the moments they happened. Explain what was missing.
 
 ### Communication Observations
-- Clarity, structure (STAR format usage), conciseness, filler words, hedging, confidence signals
+- Clarity, conciseness, filler words, hedging, confidence signals
 - Anything the candidate did well or poorly in HOW they spoke
+
+### STAR Method Usage
+For each behavioral answer, evaluate whether the candidate used STAR (Situation, Task, Action, Result):
+- Which answers had all four components?
+- Which answers were missing Situation/Task setup? Which jumped straight to Action?
+- Which answers had no measurable Result?
+- Quote 1-2 specific examples of strong OR weak STAR structure from the transcript.
+
+### Tough Question Handling
+Evaluate how the candidate handled the hard questions specifically:
+- **"Biggest weakness"** — was it a real weakness or a humblebrag? Quote the answer.
+- **"Why hire you over others"** — did they differentiate specifically or generically?
+- **"Why NOT hire you"** — did they show self-awareness or deflect?
+- **"Difficult coworker / conflict"** — did they take ownership, or blame the other person?
+- **"Failure / mistake"** — did they own it, learn from it, or minimize it?
+- **Pushback moments** — when the interviewer pushed back on a weak answer, did the candidate strengthen it or double down on the fluff?
 
 ### Job Fit Signal
 - Based on the transcript alone, how strong is the case that this candidate matches the JD?
