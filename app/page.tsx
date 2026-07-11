@@ -1483,6 +1483,19 @@ function InterviewSimulator() {
         throw new Error("Microphone not available in this browser. Try Chrome or Safari.");
       }
 
+      // Check current permission state (helps surface iOS OS-level blocks that don't re-prompt)
+      let preState: string | null = null;
+      try {
+        if ("permissions" in navigator) {
+          const status = await navigator.permissions.query({ name: "microphone" as PermissionName });
+          preState = status.state;
+        }
+      } catch {}
+
+      if (preState === "denied") {
+        throw new Error("PERMISSION_DENIED_PRE");
+      }
+
       micStream.current = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
@@ -1516,14 +1529,25 @@ function InterviewSimulator() {
     } catch (err) {
       console.error("Failed to start interview:", err);
       const msg = err instanceof Error ? err.message : String(err);
-      const friendly = /permission|denied|notallowed/i.test(msg)
-        ? "Microphone permission was denied. Enable mic access for this site in your browser settings and try again."
+      const denied = msg === "PERMISSION_DENIED_PRE" || /permission|denied|notallowed/i.test(msg);
+      const friendly = denied
+        ? "MIC_DENIED"
         : /notfound|no.*device/i.test(msg)
         ? "No microphone found. Connect a mic and try again."
         : msg || "Failed to start. Please try again.";
       setStartError(friendly);
       setStarting(false);
     }
+  }
+
+  function detectPlatform(): "ios-chrome" | "ios-safari" | "android" | "desktop" {
+    if (typeof navigator === "undefined") return "desktop";
+    const ua = navigator.userAgent;
+    const isIOS = /iPhone|iPad|iPod/.test(ua);
+    if (isIOS && /CriOS/.test(ua)) return "ios-chrome";
+    if (isIOS) return "ios-safari";
+    if (/Android/.test(ua)) return "android";
+    return "desktop";
   }
 
   async function handleEnd() {
@@ -1615,11 +1639,58 @@ function InterviewSimulator() {
             </div>
           </div>
 
-          {startError && (
+          {startError === "MIC_DENIED" ? (
+            <div className="bg-red-50 border border-red-200 rounded-lg px-3 sm:px-4 py-3">
+              <p className="text-red-700 text-xs sm:text-sm font-medium mb-2">
+                Microphone access is blocked.
+              </p>
+              <p className="text-red-700 text-xs mb-2">Enable it, then tap Start Interview again:</p>
+              {(() => {
+                const p = detectPlatform();
+                if (p === "ios-chrome") {
+                  return (
+                    <ol className="text-red-700 text-xs list-decimal pl-4 space-y-1">
+                      <li>Open the iOS <strong>Settings</strong> app</li>
+                      <li>Scroll down and tap <strong>Chrome</strong></li>
+                      <li>Turn on <strong>Microphone</strong></li>
+                      <li>Return here and tap Start Interview</li>
+                    </ol>
+                  );
+                }
+                if (p === "ios-safari") {
+                  return (
+                    <ol className="text-red-700 text-xs list-decimal pl-4 space-y-1">
+                      <li>Tap the <strong>&quot;AA&quot;</strong> icon in the Safari address bar</li>
+                      <li>Tap <strong>Website Settings</strong></li>
+                      <li>Set <strong>Microphone</strong> to <strong>Allow</strong></li>
+                      <li>If not shown: iOS Settings → Safari → Microphone → Allow for this site</li>
+                    </ol>
+                  );
+                }
+                if (p === "android") {
+                  return (
+                    <ol className="text-red-700 text-xs list-decimal pl-4 space-y-1">
+                      <li>Tap the <strong>padlock icon</strong> in the address bar</li>
+                      <li>Tap <strong>Permissions</strong> or <strong>Site settings</strong></li>
+                      <li>Set <strong>Microphone</strong> to <strong>Allow</strong></li>
+                      <li>Reload the page, then tap Start Interview</li>
+                    </ol>
+                  );
+                }
+                return (
+                  <ol className="text-red-700 text-xs list-decimal pl-4 space-y-1">
+                    <li>Click the <strong>padlock icon</strong> in the address bar</li>
+                    <li>Set <strong>Microphone</strong> to <strong>Allow</strong></li>
+                    <li>Reload the page, then click Start Interview</li>
+                  </ol>
+                );
+              })()}
+            </div>
+          ) : startError ? (
             <div className="bg-red-50 border border-red-200 rounded-lg px-3 sm:px-4 py-2 sm:py-3">
               <p className="text-red-700 text-xs sm:text-sm">{startError}</p>
             </div>
-          )}
+          ) : null}
 
           <button
             type="button"
