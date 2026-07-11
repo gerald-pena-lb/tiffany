@@ -572,6 +572,9 @@ function PageRouter() {
   if (searchParams.has("train")) {
     return <RoleplayTrainer />;
   }
+  if (searchParams.has("interview")) {
+    return <InterviewSimulator />;
+  }
   return <TiffanyCall />;
 }
 
@@ -1232,6 +1235,466 @@ function RoleplayTrainer() {
           @page {
             margin: 0.75in;
           }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+// ============================================================================
+// INTERVIEW SIMULATOR
+// ============================================================================
+
+type InterviewPhase = "setup" | "active" | "report";
+
+function InterviewSimulator() {
+  const [phase, setPhase] = useState<InterviewPhase>("setup");
+  const [jobDescription, setJobDescription] = useState("");
+  const [resume, setResume] = useState("");
+  const [candidateName, setCandidateName] = useState("");
+  const [messages, setMessages] = useState<TranscriptMessage[]>([]);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [report, setReport] = useState("");
+  const [reportScore, setReportScore] = useState<number | null>(null);
+  const [loadingReport, setLoadingReport] = useState(false);
+
+  const history = useRef<{ role: "user" | "assistant"; content: string }[]>([]);
+  const ttsSource = useRef<AudioBufferSourceNode | null>(null);
+  const micStream = useRef<MediaStream | null>(null);
+  const audioCtx = useRef<AudioContext | null>(null);
+  const analyser = useRef<AnalyserNode | null>(null);
+  const running = useRef(false);
+  const processing = useRef(false);
+  const pendingBlob = useRef<Blob | null>(null);
+  const jdRef = useRef("");
+  const resumeRef = useRef("");
+  const nameRef = useRef("");
+
+  useEffect(() => () => { running.current = false; cleanupInterview(); }, []);
+
+  function cleanupInterview() {
+    try { ttsSource.current?.stop(); } catch {}
+    ttsSource.current = null;
+    micStream.current?.getTracks().forEach((t) => t.stop());
+    micStream.current = null;
+    audioCtx.current?.close().catch(() => {});
+    audioCtx.current = null;
+    analyser.current = null;
+  }
+
+  function getMime(): string {
+    const types = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus", ""];
+    for (const t of types) {
+      if (!t || MediaRecorder.isTypeSupported(t)) return t;
+    }
+    return "";
+  }
+
+  function recordLoop() {
+    if (!micStream.current || !running.current || !analyser.current) return;
+    if (audioCtx.current?.state === "suspended") audioCtx.current.resume();
+
+    const mime = getMime();
+    const recorder = new MediaRecorder(micStream.current, mime ? { mimeType: mime } : undefined);
+    const chunks: Blob[] = [];
+    recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+    recorder.onstop = () => {
+      if (!running.current) return;
+      const blob = chunks.length > 0 ? new Blob(chunks, { type: recorder.mimeType || "audio/webm" }) : null;
+      if (blob && blob.size > 500) processBlob(blob);
+      if (running.current) recordLoop();
+    };
+    recorder.start();
+
+    const data = new Float32Array(analyser.current!.fftSize);
+    let silenceStart: number | null = null;
+    let hasSound = false;
+    let consecutive = 0;
+    let total = 0;
+    const THRESHOLD = 0.035;
+    const MIN_CONSEC = 6;
+    const MIN_TOTAL = 20;
+
+    const check = () => {
+      if (!running.current || recorder.state !== "recording") {
+        if (recorder.state === "recording") recorder.stop();
+        return;
+      }
+      analyser.current!.getFloatTimeDomainData(data);
+      const rms = Math.sqrt(data.reduce((s, v) => s + v * v, 0) / data.length);
+      if (rms > THRESHOLD) {
+        consecutive++;
+        total++;
+        if (consecutive >= MIN_CONSEC) {
+          hasSound = true;
+          silenceStart = null;
+          if (ttsSource.current) {
+            try { ttsSource.current.stop(); } catch {}
+            ttsSource.current = null;
+            setIsSpeaking(false);
+          }
+        }
+      } else {
+        consecutive = 0;
+        if (hasSound) {
+          if (!silenceStart) silenceStart = Date.now();
+          else if (Date.now() - silenceStart > 2200) {
+            if (total < MIN_TOTAL) {
+              hasSound = false;
+              silenceStart = null;
+              total = 0;
+              requestAnimationFrame(check);
+              return;
+            }
+            recorder.stop();
+            return;
+          }
+        }
+      }
+      requestAnimationFrame(check);
+    };
+    requestAnimationFrame(check);
+  }
+
+  async function processBlob(blob: Blob) {
+    if (processing.current) {
+      pendingBlob.current = blob;
+      return;
+    }
+    processing.current = true;
+    try {
+      const form = new FormData();
+      form.append("audio", blob);
+      const sttRes = await fetch("/api/stt", { method: "POST", body: form });
+      if (!sttRes.ok) throw new Error("STT failed");
+      const { text } = await sttRes.json();
+      const userText = text?.trim();
+      if (!userText || !running.current) { processing.current = false; processPending(); return; }
+
+      history.current.push({ role: "user", content: userText });
+      setMessages((m) => [...m, { role: "user", message: userText }]);
+
+      const response = await chatInterview();
+      if (!running.current || !response) { processing.current = false; processPending(); return; }
+
+      history.current.push({ role: "assistant", content: response });
+      setMessages((m) => [...m, { role: "ai", message: response }]);
+      await speak(response);
+    } catch (err) {
+      console.error(err);
+    }
+    processing.current = false;
+    processPending();
+  }
+
+  function processPending() {
+    if (pendingBlob.current) {
+      const b = pendingBlob.current;
+      pendingBlob.current = null;
+      processBlob(b);
+    }
+  }
+
+  async function chatInterview(): Promise<string | null> {
+    try {
+      const res = await fetch("/api/interview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: history.current,
+          jobDescription: jdRef.current,
+          resume: resumeRef.current,
+          candidateName: nameRef.current,
+        }),
+      });
+      if (!res.ok) return null;
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let full = "", buf = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split("\n");
+        buf = lines.pop() || "";
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          try {
+            const e = JSON.parse(line.slice(6));
+            if (e.type === "text") full += e.text;
+          } catch { continue; }
+        }
+      }
+      const spoken = full
+        .replace(/\*[^*\n]{1,80}\*/g, "")
+        .replace(/\([^)\n]{1,80}\)/g, (match) => {
+          const inner = match.slice(1, -1).trim().toLowerCase();
+          const isAction = /^(pause|slight pause|laughs?|laughing|chuckles?|sighs?|thinking|beat|silence|clears throat|breathes?|smiles?|nods?)( |,|\.|$)/.test(inner);
+          return isAction ? "" : match;
+        })
+        .replace(/\s+/g, " ")
+        .trim();
+      return spoken || null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function speak(text: string): Promise<void> {
+    if (!audioCtx.current || !text) return;
+    setIsSpeaking(true);
+    try {
+      if (audioCtx.current.state === "suspended") await audioCtx.current.resume().catch(() => {});
+      const res = await fetch("/api/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      if (!res.ok) { setIsSpeaking(false); return; }
+      const arrayBuffer = await res.arrayBuffer();
+      const audioBuffer = await audioCtx.current.decodeAudioData(arrayBuffer);
+      await new Promise<void>((resolve) => {
+        const src = audioCtx.current!.createBufferSource();
+        src.buffer = audioBuffer;
+        src.connect(audioCtx.current!.destination);
+        const done = () => { setIsSpeaking(false); ttsSource.current = null; src.onended = null; resolve(); };
+        src.onended = done;
+        ttsSource.current = src;
+        src.start(0);
+      });
+    } catch {
+      setIsSpeaking(false);
+    }
+  }
+
+  async function handleStart() {
+    if (!jobDescription.trim() || !resume.trim()) return;
+    jdRef.current = jobDescription.trim();
+    resumeRef.current = resume.trim();
+    nameRef.current = candidateName.trim();
+
+    try {
+      micStream.current = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      });
+      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const ctx = new AudioCtx();
+      await ctx.resume();
+      audioCtx.current = ctx;
+      const source = ctx.createMediaStreamSource(micStream.current);
+      const anal = ctx.createAnalyser();
+      anal.fftSize = 512;
+      source.connect(anal);
+      analyser.current = anal;
+
+      running.current = true;
+      processing.current = false;
+      pendingBlob.current = null;
+      history.current = [];
+      setMessages([]);
+      setReport("");
+      setReportScore(null);
+      setPhase("active");
+
+      const opener = candidateName
+        ? `Hi ${candidateName.split(" ")[0]}, thanks for joining. I'm going to take you through some questions today to get a better sense of your background and see how you'd fit for this role. Whenever you're ready, why don't you start by walking me through your background?`
+        : "Hi, thanks for joining. I'm going to take you through some questions today to get a sense of your background and see how you'd fit for this role. Whenever you're ready, why don't you start by walking me through your background?";
+      history.current.push({ role: "assistant", content: opener });
+      setMessages([{ role: "ai", message: opener }]);
+      await speak(opener);
+      recordLoop();
+    } catch (err) {
+      console.error("Failed to start interview:", err);
+    }
+  }
+
+  async function handleEnd() {
+    running.current = false;
+    cleanupInterview();
+    setPhase("report");
+    setLoadingReport(true);
+
+    const transcript = history.current
+      .map((m) => `${m.role === "assistant" ? "Interviewer" : "Candidate"}: ${m.content}`)
+      .join("\n\n");
+
+    try {
+      const res = await fetch("/api/interview/report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          transcript,
+          jobDescription: jdRef.current,
+          resume: resumeRef.current,
+          candidateName: nameRef.current,
+        }),
+      });
+      const data = await res.json();
+      setReport(data.report || "Failed to generate report.");
+      setReportScore(typeof data.score === "number" ? data.score : null);
+    } catch {
+      setReport("Failed to generate report.");
+    }
+    setLoadingReport(false);
+  }
+
+  function handleReset() {
+    setPhase("setup");
+    setMessages([]);
+    setReport("");
+    setReportScore(null);
+    history.current = [];
+  }
+
+  // ---- SETUP PHASE ----
+  if (phase === "setup") {
+    return (
+      <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center px-4 py-8">
+        <div className="w-full max-w-2xl space-y-6">
+          <div className="text-center">
+            <h1 className="text-gray-800 text-2xl font-light">Interview Simulator</h1>
+            <p className="text-gray-500 text-sm mt-2">Paste a job description and your resume. Tiffany will interview you.</p>
+          </div>
+
+          <div className="bg-white border border-gray-100 rounded-xl p-5 shadow-sm space-y-4">
+            <div>
+              <label className="text-gray-600 text-xs uppercase tracking-wider mb-2 block">
+                Your Name <span className="text-gray-300 normal-case">(optional)</span>
+              </label>
+              <input
+                type="text"
+                value={candidateName}
+                onChange={(e) => setCandidateName(e.target.value)}
+                placeholder="e.g. Alex Chen"
+                className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-gray-700 text-sm focus:outline-none focus:border-gold/50"
+              />
+            </div>
+
+            <div>
+              <label className="text-gray-600 text-xs uppercase tracking-wider mb-2 block">Job Description</label>
+              <textarea
+                value={jobDescription}
+                onChange={(e) => setJobDescription(e.target.value)}
+                placeholder="Paste the full job description here — role, responsibilities, required skills, qualifications..."
+                className="w-full h-40 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-gray-700 text-sm focus:outline-none focus:border-gold/50 resize-none"
+              />
+            </div>
+
+            <div>
+              <label className="text-gray-600 text-xs uppercase tracking-wider mb-2 block">Your Resume</label>
+              <textarea
+                value={resume}
+                onChange={(e) => setResume(e.target.value)}
+                placeholder="Paste your resume as plain text — experience, education, skills, achievements..."
+                className="w-full h-40 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-gray-700 text-sm focus:outline-none focus:border-gold/50 resize-none"
+              />
+            </div>
+          </div>
+
+          <button
+            onClick={handleStart}
+            disabled={!jobDescription.trim() || !resume.trim()}
+            className="w-full bg-gold/90 hover:bg-gold disabled:bg-gray-200 disabled:cursor-not-allowed rounded-lg px-4 py-3 text-white text-sm transition-colors shadow-sm"
+          >
+            Start Interview
+          </button>
+
+          <p className="text-center text-xs text-gray-400">
+            Voice interview. Answer as you would in real life. Assessment generated when you end.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // ---- ACTIVE PHASE ----
+  if (phase === "active") {
+    return (
+      <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center px-4 py-6">
+        <p className="text-gray-500 text-xs tracking-widest uppercase mb-4">Mock Interview</p>
+        <TiffanyOrb isSpeaking={isSpeaking} isConnected={true} />
+
+        <button
+          onClick={handleEnd}
+          className="mt-8 w-10 h-10 rounded-full border border-gray-300 flex items-center justify-center text-gray-400 hover:text-red-500 hover:border-red-400 transition-colors"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+
+        <p className="text-gray-400 text-[10px] mt-4 italic">
+          Click X when done to end and get your assessment.
+        </p>
+      </div>
+    );
+  }
+
+  // ---- REPORT PHASE ----
+  const transcriptText = history.current
+    .map((m) => `${m.role === "assistant" ? "Interviewer" : "Candidate"}: ${m.content}`)
+    .join("\n\n");
+
+  return (
+    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-start px-4 py-8">
+      <div className="w-full max-w-2xl space-y-4">
+        <div className="flex items-center justify-between print:hidden">
+          <h1 className="text-gray-800 text-2xl font-light">Interview Assessment</h1>
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => window.print()}
+              disabled={loadingReport}
+              className="text-gray-500 hover:text-gray-800 text-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+              </svg>
+              Save PDF
+            </button>
+            <button
+              onClick={handleReset}
+              className="text-gray-500 hover:text-gray-800 text-sm transition-colors"
+            >
+              New Interview →
+            </button>
+          </div>
+        </div>
+
+        {loadingReport ? (
+          <div className="bg-white border border-gray-100 rounded-xl p-8 shadow-sm text-center">
+            <p className="text-gray-500 text-sm">Analyzing your interview...</p>
+          </div>
+        ) : (
+          <div id="printable-interview-report" className="space-y-6">
+            <div className="hidden print:block mb-6">
+              <h1 className="text-2xl font-light text-gray-800">Interview Assessment</h1>
+              <p className="text-xs text-gray-500 mt-1">
+                {nameRef.current || "Candidate"} · {new Date().toLocaleString()}
+                {reportScore !== null && ` · Score ${reportScore}/100`}
+              </p>
+            </div>
+
+            <div className="bg-white border border-gray-100 rounded-xl p-6 shadow-sm print:shadow-none print:border-0 print:p-0 print:break-inside-avoid">
+              <pre className="text-gray-700 text-sm whitespace-pre-wrap font-sans leading-relaxed">
+                {report}
+              </pre>
+            </div>
+
+            <div className="bg-white border border-gray-100 rounded-xl p-6 shadow-sm print:shadow-none print:border-0 print:p-0 print:break-before-page">
+              <h2 className="text-gray-500 text-xs uppercase tracking-wider mb-3">Full Transcript</h2>
+              <pre className="text-gray-600 text-xs whitespace-pre-wrap font-sans leading-relaxed">
+                {transcriptText || "No conversation recorded."}
+              </pre>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <style jsx global>{`
+        @media print {
+          body { background: white !important; }
+          @page { margin: 0.75in; }
         }
       `}</style>
     </div>
