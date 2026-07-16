@@ -17,8 +17,10 @@ Produce a detailed written assessment in this EXACT markdown format. Quote speci
 # Interview Assessment
 
 **Overall Verdict:** (Strong / Solid / Needs Work / Below Standard)
-**Score:** X/100
+**Score:** [replace with actual number 0-100]/100
 **One-line summary:** (single sentence)
+
+⚠️ You MUST replace "[replace with actual number 0-100]" with a real integer you computed. Do not leave the placeholder text.
 
 ---
 
