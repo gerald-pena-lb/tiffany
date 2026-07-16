@@ -65,7 +65,7 @@ export default function SessionDetailPage() {
             </h1>
             <p className="text-gray-400 text-xs mt-1">
               {new Date(session.created_at).toLocaleString()} · {session.mode} mode
-              {session.score !== null && ` · Score ${session.score}/100`}
+              {session.score !== null && ` · Score ${session.score}/27`}
             </p>
           </div>
           <button
@@ -83,7 +83,7 @@ export default function SessionDetailPage() {
           <h1 className="text-2xl font-light">{session.user_name}&apos;s NEPQ Roleplay</h1>
           <p className="text-xs text-gray-500">
             {new Date(session.created_at).toLocaleString()} · {session.mode} mode
-            {session.score !== null && ` · Score ${session.score}/100`}
+            {session.score !== null && ` · Score ${session.score}/27`}
           </p>
         </div>
 

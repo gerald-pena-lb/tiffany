@@ -1196,7 +1196,7 @@ function RoleplayTrainer() {
             {savedSessionId && (
               <div className="print:hidden bg-green-50 border border-green-200 rounded-lg px-4 py-2 flex items-center justify-between">
                 <p className="text-green-700 text-xs">
-                  Session saved{reportScore !== null && <span className="ml-2 font-medium">· Score {reportScore}/100</span>}
+                  Session saved{reportScore !== null && <span className="ml-2 font-medium">· Score {reportScore}/27</span>}
                 </p>
                 <a href="/data/training" className="text-green-700 hover:text-green-900 text-xs underline">
                   View all

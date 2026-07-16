@@ -130,12 +130,11 @@ export default function TrainingListPage() {
                     <td className="p-3 text-right">
                       {s.score !== null ? (
                         <span className={`text-sm font-medium ${
-                          s.score >= 90 ? "text-green-600" :
-                          s.score >= 75 ? "text-gray-700" :
-                          s.score >= 60 ? "text-yellow-600" :
+                          s.score >= 22 ? "text-green-600" :
+                          s.score >= 15 ? "text-gray-700" :
                           "text-red-500"
                         }`}>
-                          {s.score}/100
+                          {s.score}/27
                         </span>
                       ) : (
                         <span className="text-gray-300 text-xs">—</span>
