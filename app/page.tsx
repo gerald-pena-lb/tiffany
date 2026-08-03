@@ -148,7 +148,7 @@ function TiffanyCall() {
         consecutiveLoudFrames = 0;
         if (hasSound) {
           if (!silenceStart) silenceStart = Date.now();
-          else if (Date.now() - silenceStart > 2200) {
+          else if (Date.now() - silenceStart > 1500) {
             // If very little actual speech was detected, treat as noise and discard
             if (totalSpeechFrames < MIN_TOTAL_SPEECH_FRAMES) {
               // Discard: reset and keep listening on same recorder
@@ -726,7 +726,7 @@ function RoleplayTrainer() {
         consecutive = 0;
         if (hasSound) {
           if (!silenceStart) silenceStart = Date.now();
-          else if (Date.now() - silenceStart > 2200) {
+          else if (Date.now() - silenceStart > 1500) {
             if (total < MIN_TOTAL) {
               hasSound = false;
               silenceStart = null;
@@ -1340,7 +1340,7 @@ function InterviewSimulator() {
         consecutive = 0;
         if (hasSound) {
           if (!silenceStart) silenceStart = Date.now();
-          else if (Date.now() - silenceStart > 2200) {
+          else if (Date.now() - silenceStart > 1500) {
             if (total < MIN_TOTAL) {
               hasSound = false;
               silenceStart = null;
