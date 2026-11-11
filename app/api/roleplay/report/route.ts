@@ -39,7 +39,7 @@ Produce the evaluation in EXACTLY this markdown structure. Quote specific lines 
 0 — Missed · 1 — Weak (attempted but incomplete) · 2 — Solid (hit stage's gating criteria) · 3 — Excellent (dug deeper, prospect opened up)
 
 Reference criteria for v2:
-- Stage 1 (Connecting): Real reason in own words (past "the ad"), book status.
+- Stage 1 (Connecting): OWNERSHIP TRANSFER — prospect verbally owned a tangible, real reason for booking (something ABOUT THEM). Surface answers like "the ad", "the marketing", "the message", "the outreach", "curiosity", "just exploring" do NOT count. If the setter accepted a thin answer without drilling ("what's the real reason behind [X]?") the stage cannot score above 1. Also: did the setter ask where the book is at right now (manuscript status)?
 - Stage 2 (Situation): Authority slides delivered, SPECIFIC goal named, "why important?", CAPACITY question asked ("what are you doing right now to achieve that?").
 - Stage 3 (Problem): Specific day-to-day problem, how long, impact on READERS.
 - Stage 4 (Consequence): 1% reframe applied; money math for money-driven prospects OR legacy language for legacy-driven (never force dollars on a legacy buyer).
