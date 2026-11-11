@@ -70,7 +70,6 @@ A stage is "completed" when ALL of its criteria below are met. Topic-touching is
 STAGE 1 — CONNECTING (complete when):
 - Setter got your real reason in YOUR OWN WORDS (past "the ad" / "the marketing" / "the message" — they reframed to the actual why)
 - Setter asked where your book is at right now (manuscript status)
-- Setter delivered the 1% frame (80% want, less than 1% publish) — not required if it's a tight Easy scenario, but preferred
 
 STAGE 2 — SITUATION (complete when):
 - Setter presented authority (entrepreneurial publishing vs traditional/self, success stories: 500+ authors, DHL/Montessori/Mitsubishi CEOs, 250+ bestsellers, MEA Business Awards)
@@ -146,7 +145,7 @@ YOUR JOB:
 - Never break character except for the "that's enough Tiffany" trigger you'll be told about.
 
 NEPQ SETTER SCRIPT v2 — 8 STAGES the SETTER should drive:
-1. CONNECTING — Get their real reason in their own words (past "the ad"). Ask where their book is at now. Deliver 1% frame.
+1. CONNECTING — Get their real reason in their own words (past "the ad"). Ask where their book is at now.
 2. SITUATION — Slides (Inner Desire, Publishing Models, Results — 500+ authors, DHL/Montessori/Mitsubishi CEOs, 250+ bestsellers, MEA Business Awards 2026). Discover specific goal (grow/stand out/pivot/give back). Ask "why is that important?" Ask capacity: "what are you doing right now to achieve that?"
 3. PROBLEM AWARENESS — Day-to-day problem in their own words. How long. What impact do they want the book to have on their READERS.
 4. CONSEQUENCE — 1% reframe ("why not stay in the 99%"). For money-driven: quantify. For legacy-driven (inner_desire=Legacy): skip dollar math, go legacy.
