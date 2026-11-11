@@ -1,4 +1,6 @@
-export const runtime = "edge";
+export const runtime = "nodejs";
+
+import { getScenarioById, STAGE_LABELS, stageBehavior } from "@/app/lib/scenarios";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -10,146 +12,98 @@ export async function OPTIONS() {
   return new Response(null, { status: 204, headers: CORS_HEADERS });
 }
 
-const REPORT_PROMPT = `You are a call quality evaluator for our book-publishing company's discovery/setter calls. Your job is to score call transcripts against our NEPQ-based setter script and rubric, and give the sales team clear, actionable feedback.
+function buildReportPrompt(targetStage: number) {
+  const activeStages = STAGE_LABELS.slice(0, targetStage);
+  const stageRows = activeStages.map((label, i) => {
+    return `| ${i + 1}. ${label} | X/3 | Brief justification with transcript quote |`;
+  }).join("\n");
 
-You will be given a call transcript. Evaluate it against the reference script and scoring rubric below, then produce a structured evaluation.
+  return `You are a senior sales coach and communication coach evaluating a NEPQ Setter Script roleplay. The user (setter in training) practiced stages 1 through ${targetStage} (${activeStages.join(", ")}).
 
-═══════════════════════════════════════
-REFERENCE SCRIPT: NEPQ Setter Script — Book Discovery Call
-═══════════════════════════════════════
+Do NOT score stages past Stage ${targetStage} — they were not in scope for this session.
 
-Objective: Establish authority, surface the prospect's inner desire and the gap it creates, qualify budget, and lock in the strategy call with the closer.
+Produce the evaluation in EXACTLY this markdown structure. Quote specific lines from the transcript. Be direct and specific — no generic advice.
 
-Setter should stay curious, calm, and detached — never eager to sell.
+# Setter Training Evaluation
 
-1. CONNECTING — Establish neutral frame. Open question about why they booked. Don't accept "the ad/marketing" — reframe to real motivation. Deliver the 1% frame (80% want, less than 1% do).
-
-2. SITUATION — Build authority through presentation (confirm screen share). Explain inner desire (legacy vs authority/credibility), publishing models (entrepreneurial vs traditional vs self-pub), success stories (500+ authors, 250+ bestsellers, DHL/Montasari/Mitsubishi CEOs). Ask the goal question. Follow up "why is that important to you?"
-
-3. PROBLEM AWARENESS — Get prospect to articulate a specific current problem in their own words. Establish how long. Reflect back in prospect's own terms.
-
-4. CONSEQUENCE — Quantify financially. If "business is fine," use "good vs great" reframe. Get an actual number. Deliver "gold mine" reflection.
-
-5. SOLUTION AWARENESS — Prospect (not setter) describes what impact the book should have. Get a clear reason why professional help > self-publishing in prospect's own words.
-
-6. CONSEQUENCE / LOSS — Surface what's lost if the book never gets written. Tie minimization back to the Stage 4 dollar figure.
-
-7. OPEN WALLET TEST — Obtain a real number or range. Use car/marketing-investment reframe if "nothing". Use job-interview analogy to expand if anchored low. Confirm upper comfort level, not just floor.
-
-8. TRANSITION / BOOKING — Clear handoff to strategy call with Alinka. Screen shared, time zone confirmed, only 7-10 days shown, urgency/scarcity used. Confirmation email sent AND prospect verbally/visibly confirmed receipt. Prospect verbally confirmed day/time. Calendar invite acceptance confirmed. LinkedIn connection sent and accepted.
-
-9. PRE-CALL HOMEWORK — Prep materials explained (video + "Your Book or Your Excuse"). Specific time commitment (30-60 min) obtained verbally. Ended on a clear, positive note.
-
-═══════════════════════════════════════
-SCORING RUBRIC
-═══════════════════════════════════════
-
-Score each of the 9 stages from 0-3:
-- 0 — Missed: Stage skipped or handled off-script with no equivalent value delivered
-- 1 — Weak: Attempted but rushed, scripted-sounding, or didn't get a real answer from the prospect
-- 2 — Solid: Hit the core intent of the stage, got a genuine response, sounded conversational
-- 3 — Excellent: Fully explored, dug deeper where needed, prospect visibly engaged/opened up
-
-⚠️ STAGE 8 CAP RULE: If the prospect's confirmation of the calendar booking (receipt of invite AND acceptance) was never verbally or visibly obtained, Stage 8 cannot score above 1/3 regardless of how well the rest was executed.
-
-TOTAL SCORE = sum of all stages, max 27
-- 22-27: Excellent call, high-quality booked appointment
-- 15-21: Adequate, but note which stages were weak
-- Below 15: Re-train — likely a low-quality or unqualified booking
-
-AUTOMATIC RED FLAGS (regardless of point total):
-- Budget/range never established (Stage 7 = 0)
-- No specific goal captured from prospect (Stage 2 goal question skipped)
-- Booking made without verbal time/day confirmation
-- No confirmation from prospect that they received/accepted the booking on the calendar — treat as unconfirmed/at-risk
-- Setter sounded like reading a script rather than having a conversation
-- Prospect's own words never used in reflections (all reflection generic)
-
-TONE/DELIVERY CHECK (pass/fail, across whole call):
-- Sounded curious and calm, never eager or salesy
-- Used prospect's own language when reflecting back
-- Didn't rush past objections without reframing
-- Silence/pauses used to let prospect answer rather than filling gaps
-
-BOOKING INTEGRITY CHECK (separate pass/fail, tied to Stage 8):
-- Prospect confirmed receipt of the invite/email
-- Prospect confirmed the specific day/time verbally
-- Calendar acceptance confirmed before call ended
-- LinkedIn connection sent and accepted
-If any item is unchecked, flag the appointment as "unconfirmed."
-
-═══════════════════════════════════════
-OUTPUT FORMAT — respond in EXACTLY this markdown structure
-═══════════════════════════════════════
-
-# Setter Call Evaluation
-
-**Total Score:** X/27 — <rating band: Excellent / Adequate / Re-train>
-**Booking Status:** Confirmed / Unconfirmed
-**Tone/Delivery:** Pass / Fail
+**Target Stage:** Stage ${targetStage} — ${activeStages[targetStage - 1]}
+**Target Reached:** Yes / Partial / No — short reason
+**NEPQ Score:** [replace with actual integer]/${targetStage * 3}
+**Communication Score:** [replace with actual integer]/15 (sum of 3 communication dimensions below, each 0-5)
+**Overall Verdict:** Strong / Solid / Needs Work / Below Standard
 
 ---
 
-## Stage-by-Stage Scores
+## Stage-by-Stage NEPQ Scores (0-3 each)
+
+0 — Missed · 1 — Weak · 2 — Solid · 3 — Excellent
 
 | Stage | Score | Justification |
 |-------|-------|---------------|
-| 1. Connecting | X/3 | Brief justification with quote from transcript |
-| 2. Situation | X/3 | Brief justification with quote |
-| 3. Problem Awareness | X/3 | Brief justification with quote |
-| 4. Consequence | X/3 | Brief justification with quote |
-| 5. Solution Awareness | X/3 | Brief justification with quote |
-| 6. Consequence / Loss | X/3 | Brief justification with quote |
-| 7. Open Wallet Test | X/3 | Brief justification with quote |
-| 8. Transition / Booking | X/3 | Brief justification with quote |
-| 9. Pre-Call Homework | X/3 | Brief justification with quote |
+${stageRows}
 
 ---
 
-## Automatic Red Flags Triggered
-- List any triggered, or "None"
+## Communication Skills (0-5)
 
-## Tone/Delivery Check
-- Pass or Fail with 2-3 sentence notes referencing specific moments
+### Tone & Delivery — X/5
+- Curiosity, calm, detachment vs. eager/salesy
+- Pace, filler words ("um", "like"), hedging
+- Quote 1-2 specific moments
 
-## Booking Integrity Check
-- Receipt of invite confirmed: yes/no
-- Day/time verbally confirmed: yes/no
-- Calendar acceptance confirmed: yes/no
-- LinkedIn sent and accepted: yes/no
-- **Overall booking status:** Confirmed / Unconfirmed
+### Active Listening & Comprehension — X/5
+This is CRITICAL. For each setter response, check whether the setter actually heard what the prospect said:
+- Did the setter's next question build on the prospect's actual answer, or go off on a tangent?
+- Did the setter reflect the prospect's own words back?
+- Did the setter miss an obvious cue (emotional word, specific number, hidden pain)?
+- Quote at least ONE comprehension win AND one comprehension miss (if any). If no misses, say so.
 
-## Top 3 Coaching Points
-1. Most impactful improvement — specific to this call, with quote
-2. Second most impactful — specific and actionable
-3. Third — specific and actionable
+### Language Quality — X/5
+Evaluate word choice, sentence structure, coherence:
+- Word choice — precise and natural vs. awkward, buzzwords, jargon
+- Sentence structure — clear and tight vs. rambling, run-ons, mid-sentence pivots
+- Coherence — ideas connect logically vs. jumps, incomplete thoughts
+- Quote 1-2 moments for each dimension that stood out (positive or negative)
+
+---
 
 ## What Went Well
-- 1-3 specific strengths worth reinforcing, with quotes
+- 3-5 specific wins with quotes
+
+## What Needs to Change
+- 3-5 specific improvement areas with quotes
+- For each, give the actual fix: what to say instead
+
+## Comprehension Misses (if any)
+- List each moment where the setter's response didn't match what the prospect just said
+- For each, quote the prospect, quote the setter, and explain the mismatch
+
+## Word Choice & Phrasing Opportunities
+- 3-5 specific phrases the setter used that could be sharpened
+- Format: "You said: '...' — stronger would be: '...'"
+
+## Coach's Verdict
+One direct paragraph (3-4 sentences). What's the ONE thing to work on next?
 
 ---
 
-CRITICAL SCORING RULES:
-- REPLACE every "X" placeholder with the actual number you're scoring. Do NOT leave "X" in the output.
-- Total = sum of stage scores. Compute it. Do not leave placeholders.
-- Rating band: 22-27 Excellent, 15-21 Adequate, below 15 Re-train.
-- Be direct and specific. Quote the transcript. If a stage is ambiguous, err lower — don't inflate to be generous.`;
+SCORING RULES:
+- REPLACE every "X" placeholder with real integers. Do NOT leave "X" in the output.
+- NEPQ Score = sum of the ${targetStage} stage scores you give above.
+- Communication Score = Tone + Listening + Language (max 15).
+- Overall Verdict: Strong = both scores >= 80% of max; Solid = both >= 60%; Needs Work = one < 60%; Below Standard = both < 60%.
+- Be strict. If a stage was cursory or off-script, mark it 1. Don't inflate.`;
+}
 
-function extractScore(report: string): number | null {
-  // Try "**Total Score:** 21/27" or "Total Score: 21/27"
-  const totalMatch = report.match(/(?:\*\*)?Total Score(?:\*\*)?:?\s*(\d+)\s*\/\s*27/i);
-  if (totalMatch) return parseInt(totalMatch[1]);
+function extractNepqScore(report: string, max: number): number | null {
+  const m = report.match(/\*\*NEPQ Score:\*\*\s*(\d+)\s*\/\s*(\d+)/i);
+  if (m && parseInt(m[2]) === max) return parseInt(m[1]);
+  return null;
+}
 
-  // Fallback: sum stage table scores like "| 1. Connecting | 2/3 |"
-  const stageMatches = report.matchAll(/\|\s*\d\.[^|]+\|\s*(\d)\s*\/\s*3\s*\|/g);
-  let sum = 0;
-  let count = 0;
-  for (const m of stageMatches) {
-    sum += parseInt(m[1]);
-    count++;
-  }
-  if (count >= 5) return sum;
-
+function extractCommScore(report: string): number | null {
+  const m = report.match(/\*\*Communication Score:\*\*\s*(\d+)\s*\/\s*15/i);
+  if (m) return parseInt(m[1]);
   return null;
 }
 
@@ -160,10 +114,22 @@ export async function POST(request: Request) {
   }
 
   try {
-    const { transcript, persona, userName } = await request.json();
+    const { transcript, scenarioId, targetStage, userName } = await request.json();
     if (!transcript) {
       return Response.json({ error: "Missing transcript" }, { status: 400, headers: CORS_HEADERS });
     }
+
+    const stage = Math.max(1, Math.min(8, targetStage || 8));
+    const scenario = getScenarioById(scenarioId);
+
+    const contextForEvaluator = scenario
+      ? `SCENARIO: ${scenario.scenario_id} — ${scenario.prospect_name} (${scenario.position})
+Difficulty: ${scenario.difficulty}
+Key truths: trigger=${scenario.gate_trigger_and_date}; money_available=${scenario.gate_money_available_now}; set_aside=${scenario.money_set_aside_answer}; DMs=${scenario.other_decision_makers}; objection=${scenario.main_objection} (at ${scenario.objection_stage})
+Setter win condition for this scenario: ${scenario.setter_win_condition}
+Active stage behavior for this run (1 through ${stage}):
+${Array.from({ length: stage }, (_, i) => `- Stage ${i + 1} (${STAGE_LABELS[i]}): ${stageBehavior(scenario, i + 1)}`).join("\n")}`
+      : "SCENARIO: Not provided";
 
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -174,13 +140,13 @@ export async function POST(request: Request) {
       },
       body: JSON.stringify({
         model: "claude-sonnet-4-6",
-        max_tokens: 3000,
+        max_tokens: 3500,
         temperature: 0.2,
-        system: REPORT_PROMPT,
+        system: buildReportPrompt(stage),
         messages: [
           {
             role: "user",
-            content: `SETTER NAME: ${userName || "Trainee"}\n\nPROSPECT PERSONA (roleplay context):\n${persona || "Not provided"}\n\nCALL TRANSCRIPT:\n${transcript}`,
+            content: `SETTER NAME: ${userName || "Trainee"}\n\n${contextForEvaluator}\n\nCALL TRANSCRIPT:\n${transcript}`,
           },
         ],
       }),
@@ -193,9 +159,25 @@ export async function POST(request: Request) {
 
     const data = await res.json();
     const report = data.content?.[0]?.text || "Report generation failed.";
-    const score = extractScore(report);
+    const nepqScore = extractNepqScore(report, stage * 3);
+    const commScore = extractCommScore(report);
 
-    return Response.json({ report, score }, { headers: CORS_HEADERS });
+    // Combined score as a percentage for sorting (0-100)
+    let combined: number | null = null;
+    if (nepqScore !== null && commScore !== null) {
+      const nepqPct = nepqScore / (stage * 3);
+      const commPct = commScore / 15;
+      combined = Math.round(((nepqPct + commPct) / 2) * 100);
+    }
+
+    return Response.json({
+      report,
+      score: combined,
+      nepqScore,
+      nepqMax: stage * 3,
+      commScore,
+      commMax: 15,
+    }, { headers: CORS_HEADERS });
   } catch (err) {
     return Response.json({ error: String(err) }, { status: 500, headers: CORS_HEADERS });
   }

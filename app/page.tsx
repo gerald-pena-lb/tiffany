@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useRef, useEffect, Suspense } from "react";
+import { useState, useRef, useEffect, Suspense, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import TiffanyOrb from "@/components/TiffanyOrb";
 import Transcript, { type TranscriptMessage } from "@/components/Transcript";
 import CalendlyEmbed from "@/components/CalendlyEmbed";
+import { SCENARIOS, type Scenario } from "@/app/lib/scenarios";
 
 const CALENDLY_URL = "https://calendly.com/talktoalinka/author-call";
 
@@ -589,24 +590,22 @@ const STAGE_NAMES = [
   "Situation",
   "Problem",
   "Consequence",
-  "Solution",
-  "Loss",
+  "Rationale",
   "Wallet",
-  "Booking",
+  "Scheduling",
   "Homework",
 ];
 
 const MODE_HINTS: Record<Mode, string[]> = {
   training: [
     "1 CONNECTING: Why are they REALLY here? Reinforce the 1% frame (80% want, <1% do).",
-    "2 SITUATION: Present authority (entrepreneurial publishing vs traditional/self, DHL/Mitsubishi, 500+ authors). Discover their goal + why it matters.",
+    "2 SITUATION: Authority (entrepreneurial publishing, DHL/Mitsubishi, 500+ authors). Discover their goal + why it matters.",
     "3 PROBLEM: What are they seeing day-to-day? How long? Reflect back the time.",
     "4 CONSEQUENCE: Quantify the cost. Gold mine reframe. Get them to say 'we need to do something different.'",
-    "5 SOLUTION: What should the book do for their prospects? Why professional help vs self-publish?",
-    "6 LOSS: What's lost if the book stays in their head? Tie back to the number.",
-    "7 WALLET: 'What have you set aside?' Car analogy if nothing. $6K-$50K range. First-impression reframe if anchored low.",
-    "8 BOOKING: Strategy call with Alinka. Confirm time zone. Verbal confirmation of slot.",
-    "9 HOMEWORK: 30-60 min prep materials before strategy call. Get commitment.",
+    "5 RATIONALE: Why pros over DIY? What should the book accomplish for prospects? What's lost if it never ships?",
+    "6 WALLET: 'What have you set aside?' Car analogy if nothing. $6K-$50K range. First-impression reframe if anchored low.",
+    "7 SCHEDULING: Strategy call with Alinka. Confirm time zone. Verbal confirmation of slot.",
+    "8 HOMEWORK: 30-60 min prep materials before strategy call. Get commitment.",
   ],
   guided: [
     "Ask open-ended questions. Let silence do the work.",
@@ -621,7 +620,9 @@ const MODE_HINTS: Record<Mode, string[]> = {
 
 function RoleplayTrainer() {
   const [phase, setPhase] = useState<Phase>("setup");
-  const [persona, setPersona] = useState("");
+  const [scenarioId, setScenarioId] = useState<string>(SCENARIOS[0]?.scenario_id || "");
+  const [difficultyFilter, setDifficultyFilter] = useState<"All" | "Easy" | "Medium" | "Hard">("All");
+  const [targetStage, setTargetStage] = useState<number>(7);
   const [mode, setMode] = useState<Mode>("guided");
   const [userName, setUserName] = useState<SetterName>("Alain");
   const [messages, setMessages] = useState<TranscriptMessage[]>([]);
@@ -631,6 +632,8 @@ function RoleplayTrainer() {
   const [coachModeActive, setCoachModeActive] = useState(false);
   const [report, setReport] = useState<string>("");
   const [reportScore, setReportScore] = useState<number | null>(null);
+  const [reportNepq, setReportNepq] = useState<{ score: number; max: number } | null>(null);
+  const [reportComm, setReportComm] = useState<{ score: number; max: number } | null>(null);
   const [loadingReport, setLoadingReport] = useState(false);
   const [savedSessionId, setSavedSessionId] = useState<string | null>(null);
 
@@ -642,10 +645,22 @@ function RoleplayTrainer() {
   const running = useRef(false);
   const processing = useRef(false);
   const pendingBlob = useRef<Blob | null>(null);
-  const personaRef = useRef("");
+  const scenarioIdRef = useRef("");
+  const targetStageRef = useRef(7);
   const modeRef = useRef<Mode>("guided");
   const userNameRef = useRef<SetterName>("Alain");
   const coachModeRef = useRef(false);
+  const autoEnding = useRef(false);
+
+  const filteredScenarios = useMemo(() => {
+    if (difficultyFilter === "All") return SCENARIOS;
+    return SCENARIOS.filter((s) => s.difficulty === difficultyFilter);
+  }, [difficultyFilter]);
+
+  const currentScenario: Scenario | undefined = useMemo(
+    () => SCENARIOS.find((s) => s.scenario_id === scenarioId),
+    [scenarioId]
+  );
 
   function isBreakCharacterPhrase(text: string): boolean {
     const n = text.toLowerCase().replace(/[^a-z ]/g, "").trim();
@@ -780,6 +795,20 @@ function RoleplayTrainer() {
         setCoachTip(null);
       }
       await speak(response.spoken);
+
+      // Auto-end if the setter has completed the target stage
+      if (
+        !coachModeRef.current &&
+        response.stage !== null &&
+        response.stage > targetStageRef.current &&
+        !autoEnding.current
+      ) {
+        autoEnding.current = true;
+        processing.current = false;
+        processPending();
+        handleEndRoleplay();
+        return;
+      }
     } catch (err) {
       console.error(err);
     }
@@ -795,14 +824,15 @@ function RoleplayTrainer() {
     }
   }
 
-  async function chatRoleplay(): Promise<{ spoken: string; coach: string | null } | null> {
+  async function chatRoleplay(): Promise<{ spoken: string; coach: string | null; stage: number | null } | null> {
     try {
       const res = await fetch("/api/roleplay", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           messages: history.current,
-          persona: personaRef.current,
+          scenarioId: scenarioIdRef.current,
+          targetStage: targetStageRef.current,
           mode: modeRef.current,
           userName: userNameRef.current,
           coachMode: coachModeRef.current,
@@ -811,7 +841,7 @@ function RoleplayTrainer() {
       if (!res.ok) return null;
       const reader = res.body!.getReader();
       const decoder = new TextDecoder();
-      let full = "", buf = "", coach: string | null = null;
+      let full = "", buf = "", coach: string | null = null, stage: number | null = null;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -824,7 +854,7 @@ function RoleplayTrainer() {
           try {
             const e = JSON.parse(line.slice(6));
             if (e.type === "text") full += e.text;
-            else if (e.type === "stage") setCurrentStage(e.stage);
+            else if (e.type === "stage") { setCurrentStage(e.stage); stage = e.stage; }
             else if (e.type === "coach") coach = e.tip;
           } catch { continue; }
         }
@@ -840,7 +870,7 @@ function RoleplayTrainer() {
         })
         .replace(/\s+/g, " ")
         .trim();
-      return { spoken, coach };
+      return { spoken, coach, stage };
     } catch {
       return null;
     }
@@ -874,8 +904,9 @@ function RoleplayTrainer() {
   }
 
   async function handleStartRoleplay() {
-    if (!persona.trim()) return;
-    personaRef.current = persona.trim();
+    if (!currentScenario) return;
+    scenarioIdRef.current = currentScenario.scenario_id;
+    targetStageRef.current = targetStage;
     modeRef.current = mode;
     userNameRef.current = userName;
 
@@ -896,6 +927,7 @@ function RoleplayTrainer() {
       running.current = true;
       processing.current = false;
       pendingBlob.current = null;
+      autoEnding.current = false;
       coachModeRef.current = false;
       setCoachModeActive(false);
       history.current = [];
@@ -905,10 +937,12 @@ function RoleplayTrainer() {
       setSavedSessionId(null);
       setReport("");
       setReportScore(null);
+      setReportNepq(null);
+      setReportComm(null);
       setPhase("active");
 
-      // Prospect opens with something short and neutral — like picking up a call
-      const opener = "Hey. Yeah, this is me. Who's this?";
+      const firstName = currentScenario.prospect_name.split(" ")[0] || "Hey";
+      const opener = `Hello? This is ${firstName}.`;
       history.current.push({ role: "assistant", content: opener });
       setMessages([{ role: "ai", message: opener }]);
       await speak(opener);
@@ -919,6 +953,7 @@ function RoleplayTrainer() {
   }
 
   async function handleEndRoleplay() {
+    if (!running.current && phase === "report") return;
     running.current = false;
     cleanupRoleplay();
     setPhase("report");
@@ -943,7 +978,8 @@ function RoleplayTrainer() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           transcript: reportTranscript,
-          persona: personaRef.current,
+          scenarioId: scenarioIdRef.current,
+          targetStage: targetStageRef.current,
           userName: userNameRef.current,
         }),
       });
@@ -952,6 +988,12 @@ function RoleplayTrainer() {
       generatedScore = typeof data.score === "number" ? data.score : null;
       setReport(generatedReport);
       setReportScore(generatedScore);
+      if (typeof data.nepqScore === "number" && typeof data.nepqMax === "number") {
+        setReportNepq({ score: data.nepqScore, max: data.nepqMax });
+      }
+      if (typeof data.commScore === "number" && typeof data.commMax === "number") {
+        setReportComm({ score: data.commScore, max: data.commMax });
+      }
     } catch {
       setReport("Failed to generate report.");
     }
@@ -965,7 +1007,9 @@ function RoleplayTrainer() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             userName: userNameRef.current,
-            persona: personaRef.current,
+            persona: currentScenario
+              ? `${currentScenario.scenario_id} — ${currentScenario.prospect_name} (${currentScenario.difficulty}) — target: Stage ${targetStageRef.current} ${STAGE_NAMES[targetStageRef.current - 1]}`
+              : "",
             mode: modeRef.current,
             transcript: compactTranscript,
             assessment: generatedReport,
@@ -980,31 +1024,35 @@ function RoleplayTrainer() {
 
   function handleReset() {
     setPhase("setup");
-    setPersona("");
     setMessages([]);
     setReport("");
     setReportScore(null);
+    setReportNepq(null);
+    setReportComm(null);
     setCurrentStage(1);
     setCoachTip(null);
     coachModeRef.current = false;
     setCoachModeActive(false);
     setSavedSessionId(null);
+    autoEnding.current = false;
     history.current = [];
   }
 
   // ---- SETUP PHASE ----
   if (phase === "setup") {
     return (
-      <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center px-4 py-8">
-        <div className="w-full max-w-lg space-y-6">
+      <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-start sm:justify-center px-3 sm:px-4 py-6 sm:py-8">
+        <div className="w-full max-w-2xl space-y-4 sm:space-y-6">
           <div className="text-center">
-            <h1 className="text-gray-800 text-2xl font-light">NEPQ Roleplay Trainer</h1>
-            <p className="text-gray-500 text-sm mt-2">Practice as the setter. Tiffany plays the prospect.</p>
+            <h1 className="text-gray-800 text-xl sm:text-2xl font-light">NEPQ Roleplay Trainer</h1>
+            <p className="text-gray-500 text-xs sm:text-sm mt-1 sm:mt-2">
+              Pick a scenario and a target stage. Tiffany plays the prospect.
+            </p>
           </div>
 
-          <div className="bg-white border border-gray-100 rounded-xl p-5 shadow-sm space-y-4">
+          <div className="bg-white border border-gray-100 rounded-xl p-4 sm:p-5 shadow-sm space-y-4">
             <div>
-              <label className="text-gray-600 text-xs uppercase tracking-wider mb-2 block">Setter</label>
+              <label className="text-gray-600 text-[10px] sm:text-xs uppercase tracking-wider mb-1.5 sm:mb-2 block">Setter</label>
               <select
                 value={userName}
                 onChange={(e) => setUserName(e.target.value as SetterName)}
@@ -1017,34 +1065,85 @@ function RoleplayTrainer() {
             </div>
 
             <div>
-              <label className="text-gray-600 text-xs uppercase tracking-wider mb-2 block">Prospect Persona</label>
-              <textarea
-                value={persona}
-                onChange={(e) => setPersona(e.target.value)}
-                placeholder="e.g. Sarah, 48, founder of a wellness clinic in Toronto. Has been thinking about writing a book on gut health for 4 years. Never took action. Skeptical of publishing companies after bad experience with a vanity press. Budget-conscious. Married, husband is supportive but cautious with money."
-                className="w-full h-32 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-gray-700 text-sm focus:outline-none focus:border-gold/50 resize-none"
-              />
+              <div className="flex items-center justify-between mb-1.5 sm:mb-2">
+                <label className="text-gray-600 text-[10px] sm:text-xs uppercase tracking-wider">Scenario</label>
+                <div className="flex gap-1">
+                  {(["All", "Easy", "Medium", "Hard"] as const).map((d) => (
+                    <button
+                      key={d}
+                      onClick={() => setDifficultyFilter(d)}
+                      className={`px-2 py-0.5 rounded text-[10px] transition-colors ${
+                        difficultyFilter === d
+                          ? "bg-gold/20 text-gold border border-gold/30"
+                          : "text-gray-400 border border-gray-200 hover:text-gray-600"
+                      }`}
+                    >
+                      {d}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <select
+                value={scenarioId}
+                onChange={(e) => setScenarioId(e.target.value)}
+                className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-gray-700 text-sm focus:outline-none focus:border-gold/50"
+              >
+                {filteredScenarios.map((s) => (
+                  <option key={s.scenario_id} value={s.scenario_id}>
+                    {s.scenario_id} · {s.difficulty} · {s.prospect_name} — {s.segment}
+                  </option>
+                ))}
+              </select>
+              {currentScenario && (
+                <div className="mt-2 bg-gray-50 border border-gray-100 rounded-lg px-3 py-2 text-xs text-gray-600 space-y-1">
+                  <p><span className="text-gray-400">Position:</span> {currentScenario.position}</p>
+                  <p><span className="text-gray-400">Book:</span> {currentScenario.working_title} — {currentScenario.book_idea}</p>
+                  <p><span className="text-gray-400">Personality:</span> {currentScenario.personality}</p>
+                  <p><span className="text-gray-400">Manuscript:</span> {currentScenario.manuscript_status}</p>
+                  <p className="text-gold/80"><span className="text-gray-400">Main objection:</span> {currentScenario.main_objection} <span className="text-gray-400">(at {currentScenario.objection_stage})</span></p>
+                </div>
+              )}
             </div>
 
             <div>
-              <label className="text-gray-600 text-xs uppercase tracking-wider mb-2 block">Difficulty</label>
+              <label className="text-gray-600 text-[10px] sm:text-xs uppercase tracking-wider mb-1.5 sm:mb-2 block">
+                Target Stage — practice up through
+              </label>
+              <select
+                value={targetStage}
+                onChange={(e) => setTargetStage(parseInt(e.target.value))}
+                className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-gray-700 text-sm focus:outline-none focus:border-gold/50"
+              >
+                {STAGE_NAMES.map((name, i) => (
+                  <option key={name} value={i + 1}>
+                    Stage {i + 1} — {name}
+                  </option>
+                ))}
+              </select>
+              <p className="text-[10px] text-gray-400 mt-1">
+                Roleplay auto-ends once the setter completes Stage {targetStage}. Feedback covers only stages 1–{targetStage}.
+              </p>
+            </div>
+
+            <div>
+              <label className="text-gray-600 text-[10px] sm:text-xs uppercase tracking-wider mb-1.5 sm:mb-2 block">Difficulty</label>
               <div className="grid grid-cols-3 gap-2">
                 {([
                   { key: "training", title: "Training Wheels", desc: "Stage shown + live coaching" },
-                  { key: "guided", title: "Guided", desc: "Subtle hints during call" },
+                  { key: "guided", title: "Guided", desc: "Stage shown. No coaching." },
                   { key: "hardcore", title: "Hardcore", desc: "No help. Real difficulty." },
                 ] as { key: Mode; title: string; desc: string }[]).map((m) => (
                   <button
                     key={m.key}
                     onClick={() => setMode(m.key)}
-                    className={`p-3 rounded-lg border text-left transition-colors ${
+                    className={`p-2 sm:p-3 rounded-lg border text-left transition-colors ${
                       mode === m.key
                         ? "border-gold bg-gold/5"
                         : "border-gray-200 hover:border-gray-300"
                     }`}
                   >
-                    <p className="text-gray-800 text-sm font-medium">{m.title}</p>
-                    <p className="text-gray-400 text-[10px] mt-1 leading-tight">{m.desc}</p>
+                    <p className="text-gray-800 text-xs sm:text-sm font-medium">{m.title}</p>
+                    <p className="text-gray-400 text-[10px] mt-0.5 leading-tight">{m.desc}</p>
                   </button>
                 ))}
               </div>
@@ -1053,14 +1152,14 @@ function RoleplayTrainer() {
 
           <button
             onClick={handleStartRoleplay}
-            disabled={!persona.trim()}
+            disabled={!currentScenario}
             className="w-full bg-gold/90 hover:bg-gold disabled:bg-gray-200 disabled:cursor-not-allowed rounded-lg px-4 py-3 text-white text-sm transition-colors shadow-sm"
           >
             Start Roleplay
           </button>
 
-          <div className="flex items-center justify-between text-xs text-gray-400">
-            <span>Say &quot;that&apos;s enough Tiffany&quot; to break character during the call.</span>
+          <div className="flex items-center justify-between text-[10px] sm:text-xs text-gray-400">
+            <span>Say &quot;that&apos;s enough Tiffany&quot; to break character.</span>
             <a href="/data/training" className="text-gray-500 hover:text-gold transition-colors">
               Past sessions →
             </a>
@@ -1089,24 +1188,36 @@ function RoleplayTrainer() {
         ) : mode === "training" ? (
           <div className="w-full max-w-lg mb-4">
             <div className="bg-white border border-gray-100 rounded-lg p-3 shadow-sm">
-              <p className="text-gray-400 text-[10px] uppercase tracking-wider mb-1">
-                Stage {currentStage}/9 — {STAGE_NAMES[currentStage - 1]}
-              </p>
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-gray-400 text-[10px] uppercase tracking-wider">
+                  Stage {currentStage}/8 — {STAGE_NAMES[currentStage - 1]}
+                </p>
+                <p className="text-gold/70 text-[10px]">
+                  Target: Stage {targetStage}
+                </p>
+              </div>
               <div className="flex gap-0.5">
-                {STAGE_NAMES.map((name, i) => (
-                  <div
-                    key={name}
-                    className={`flex-1 text-center py-0.5 text-[9px] rounded ${
-                      i + 1 === currentStage
-                        ? "bg-gold/20 text-gold font-medium"
-                        : i + 1 < currentStage
-                        ? "bg-gray-100 text-gray-400"
-                        : "text-gray-300"
-                    }`}
-                  >
-                    {name}
-                  </div>
-                ))}
+                {STAGE_NAMES.map((name, i) => {
+                  const isTarget = i + 1 === targetStage;
+                  const isCurrent = i + 1 === currentStage;
+                  const isPast = i + 1 < currentStage;
+                  return (
+                    <div
+                      key={name}
+                      className={`flex-1 text-center py-0.5 text-[9px] rounded ${
+                        isCurrent
+                          ? "bg-gold/20 text-gold font-medium"
+                          : isPast
+                          ? "bg-gray-100 text-gray-400"
+                          : isTarget
+                          ? "border border-gold/30 text-gold/70"
+                          : "text-gray-300"
+                      }`}
+                    >
+                      {name}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -1196,7 +1307,10 @@ function RoleplayTrainer() {
             {savedSessionId && (
               <div className="print:hidden bg-green-50 border border-green-200 rounded-lg px-4 py-2 flex items-center justify-between">
                 <p className="text-green-700 text-xs">
-                  Session saved{reportScore !== null && <span className="ml-2 font-medium">· Score {reportScore}/27</span>}
+                  Session saved
+                  {reportNepq && <span className="ml-2 font-medium">· NEPQ {reportNepq.score}/{reportNepq.max}</span>}
+                  {reportComm && <span className="ml-2 font-medium">· Comm {reportComm.score}/{reportComm.max}</span>}
+                  {reportScore !== null && !reportNepq && <span className="ml-2 font-medium">· Score {reportScore}/100</span>}
                 </p>
                 <a href="/data/training" className="text-green-700 hover:text-green-900 text-xs underline">
                   View all
@@ -1205,8 +1319,17 @@ function RoleplayTrainer() {
             )}
 
             <div className="bg-white border border-gray-100 rounded-xl p-6 shadow-sm print:shadow-none print:border-0 print:p-0">
-              <h2 className="text-gray-500 text-xs uppercase tracking-wider mb-3 print:mb-2">Prospect Persona</h2>
-              <p className="text-gray-700 text-sm leading-relaxed">{personaRef.current || "Not specified"}</p>
+              <h2 className="text-gray-500 text-xs uppercase tracking-wider mb-3 print:mb-2">Scenario</h2>
+              {currentScenario ? (
+                <div className="text-gray-700 text-sm space-y-1">
+                  <p><span className="text-gray-400">ID:</span> {currentScenario.scenario_id} · {currentScenario.difficulty}</p>
+                  <p><span className="text-gray-400">Prospect:</span> {currentScenario.prospect_name} — {currentScenario.position}</p>
+                  <p><span className="text-gray-400">Book:</span> {currentScenario.working_title}</p>
+                  <p><span className="text-gray-400">Target stage:</span> Stage {targetStageRef.current} — {STAGE_NAMES[targetStageRef.current - 1]}</p>
+                </div>
+              ) : (
+                <p className="text-gray-700 text-sm">Not specified</p>
+              )}
               <p className="text-gray-400 text-xs mt-3">Mode: {modeRef.current}</p>
             </div>
 
