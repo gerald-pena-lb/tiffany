@@ -796,11 +796,10 @@ function RoleplayTrainer() {
       }
       await speak(response.spoken);
 
-      // Auto-end if the setter has completed the target stage
+      // Auto-end if Tiffany signaled the target stage was reached
       if (
         !coachModeRef.current &&
-        response.stage !== null &&
-        response.stage > targetStageRef.current &&
+        response.targetReached &&
         !autoEnding.current
       ) {
         autoEnding.current = true;
@@ -824,7 +823,7 @@ function RoleplayTrainer() {
     }
   }
 
-  async function chatRoleplay(): Promise<{ spoken: string; coach: string | null; stage: number | null } | null> {
+  async function chatRoleplay(): Promise<{ spoken: string; coach: string | null; stage: number | null; targetReached: boolean } | null> {
     try {
       const res = await fetch("/api/roleplay", {
         method: "POST",
@@ -842,6 +841,7 @@ function RoleplayTrainer() {
       const reader = res.body!.getReader();
       const decoder = new TextDecoder();
       let full = "", buf = "", coach: string | null = null, stage: number | null = null;
+      let targetReached = false;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -856,12 +856,14 @@ function RoleplayTrainer() {
             if (e.type === "text") full += e.text;
             else if (e.type === "stage") { setCurrentStage(e.stage); stage = e.stage; }
             else if (e.type === "coach") coach = e.tip;
+            else if (e.type === "target_reached") targetReached = true;
           } catch { continue; }
         }
       }
       const spoken = full
         .replace(/\[COACH\][\s\S]*?\[\/COACH\]/g, "")
         .replace(/\s*\[STAGE:\d\]\s*/g, "")
+        .replace(/\s*\[TARGET_REACHED\]\s*/gi, "")
         .replace(/\*[^*\n]{1,80}\*/g, "")
         .replace(/\([^)\n]{1,80}\)/g, (match) => {
           const inner = match.slice(1, -1).trim().toLowerCase();
@@ -870,7 +872,7 @@ function RoleplayTrainer() {
         })
         .replace(/\s+/g, " ")
         .trim();
-      return { spoken, coach, stage };
+      return { spoken, coach, stage, targetReached };
     } catch {
       return null;
     }

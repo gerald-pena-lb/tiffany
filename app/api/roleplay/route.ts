@@ -60,7 +60,22 @@ GROUND TRUTH — your answers to key setter questions when they ask well:
 STAGE-BY-STAGE BEHAVIOR (active stages for this session, 1 through ${targetStage}):
 ${activeStageNotes}
 
-The target stage for this session is Stage ${targetStage} — ${STAGE_LABELS[targetStage - 1]}. Do NOT deliberately advance past Stage ${targetStage}. If the setter is doing well and completes Stage ${targetStage}, acknowledge it conversationally — do not push them further.`;
+The target stage for this session is Stage ${targetStage} — ${STAGE_LABELS[targetStage - 1]}. Do NOT deliberately advance past Stage ${targetStage}.
+
+TARGET COMPLETION — CRITICAL:
+When the setter has clearly and genuinely COMPLETED Stage ${targetStage} (met its core requirement — not just touched the topic, not just started asking about it, but actually gotten the outcome the stage calls for), end your response with [TARGET_REACHED] on its own line after any [STAGE:N] tag. This signals the roleplay to auto-end.
+
+A stage is "completed" when:
+- Stage 1 (Connecting): Setter got your real why — past "the ad" / "the marketing" — and reinforced the 1% frame.
+- Stage 2 (Situation): Setter discovered your specific goal AND asked why it matters.
+- Stage 3 (Problem Awareness): You articulated a specific current problem in your own words AND how long you've had it.
+- Stage 4 (Consequence): You named a real financial number for the cost of inaction.
+- Stage 5 (Rationale): You described what the book should do AND why professional help over DIY.
+- Stage 6 (Open Wallet): You gave the setter a real budget number or range (your ground-truth money answer).
+- Stage 7 (Transition / Scheduling): You verbally confirmed a specific day/time for the strategy call with Alinka.
+- Stage 8 (Prep / Homework): You verbally committed to the 30-60 min prep before the strategy call.
+
+Only output [TARGET_REACHED] ONCE, when the goal is genuinely met. If the setter is still working on it, do NOT output it. Do NOT output it at the start of the call out of politeness. If the setter FAILS at the target stage (misses the correct move for this scenario — see "correct_scheduling_decision"), do NOT output [TARGET_REACHED]; stay in character and let them keep trying.`;
 }
 
 const BASE_PROMPT = `You are Tiffany, but in this session you are ROLEPLAYING as a PROSPECT for sales training. A trainee sales SETTER is practicing the NEPQ Setter Script by running a book discovery call with you.
@@ -259,6 +274,11 @@ export async function POST(request: Request) {
               if (coachMatch) {
                 controller.enqueue(
                   encoder.encode(`data: ${JSON.stringify({ type: "coach", tip: coachMatch[1].trim() })}\n\n`)
+                );
+              }
+              if (/\[TARGET_REACHED\]/i.test(fullText)) {
+                controller.enqueue(
+                  encoder.encode(`data: ${JSON.stringify({ type: "target_reached" })}\n\n`)
                 );
               }
               controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "done" })}\n\n`));
