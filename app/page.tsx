@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, Suspense, useMemo } from "react";
+import { useState, useRef, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import TiffanyOrb from "@/components/TiffanyOrb";
 import Transcript, { type TranscriptMessage } from "@/components/Transcript";
@@ -620,16 +620,16 @@ const MODE_HINTS: Record<Mode, string[]> = {
 
 function RoleplayTrainer() {
   const [phase, setPhase] = useState<Phase>("setup");
-  const [scenarioId, setScenarioId] = useState<string>(SCENARIOS[0]?.scenario_id || "");
-  const [difficultyFilter, setDifficultyFilter] = useState<"All" | "Easy" | "Medium" | "Hard">("All");
   const [targetStage, setTargetStage] = useState<number>(7);
-  const [mode, setMode] = useState<Mode>("guided");
+  const [timerMinutes, setTimerMinutes] = useState<number>(10);
   const [userName, setUserName] = useState<SetterName>("Alain");
   const [messages, setMessages] = useState<TranscriptMessage[]>([]);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [currentStage, setCurrentStage] = useState(1);
   const [coachTip, setCoachTip] = useState<string | null>(null);
   const [coachModeActive, setCoachModeActive] = useState(false);
+  const [activeScenario, setActiveScenario] = useState<Scenario | null>(null);
+  const [remainingSeconds, setRemainingSeconds] = useState<number>(0);
   const [report, setReport] = useState<string>("");
   const [reportScore, setReportScore] = useState<number | null>(null);
   const [reportNepq, setReportNepq] = useState<{ score: number; max: number } | null>(null);
@@ -651,16 +651,10 @@ function RoleplayTrainer() {
   const userNameRef = useRef<SetterName>("Alain");
   const coachModeRef = useRef(false);
   const autoEnding = useRef(false);
+  const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const deadlineRef = useRef<number>(0);
 
-  const filteredScenarios = useMemo(() => {
-    if (difficultyFilter === "All") return SCENARIOS;
-    return SCENARIOS.filter((s) => s.difficulty === difficultyFilter);
-  }, [difficultyFilter]);
-
-  const currentScenario: Scenario | undefined = useMemo(
-    () => SCENARIOS.find((s) => s.scenario_id === scenarioId),
-    [scenarioId]
-  );
+  const TIMER_OPTIONS = [2, 5, 10, 15, 20, 25, 30, 35, 40, 45];
 
   function isBreakCharacterPhrase(text: string): boolean {
     const n = text.toLowerCase().replace(/[^a-z ]/g, "").trim();
@@ -683,6 +677,10 @@ function RoleplayTrainer() {
     audioCtx.current?.close().catch(() => {});
     audioCtx.current = null;
     analyser.current = null;
+    if (timerIntervalRef.current) {
+      clearInterval(timerIntervalRef.current);
+      timerIntervalRef.current = null;
+    }
   }
 
   function getMime(): string {
@@ -906,11 +904,13 @@ function RoleplayTrainer() {
   }
 
   async function handleStartRoleplay() {
-    if (!currentScenario) return;
-    scenarioIdRef.current = currentScenario.scenario_id;
+    const picked = SCENARIOS[Math.floor(Math.random() * SCENARIOS.length)];
+    if (!picked) return;
+    scenarioIdRef.current = picked.scenario_id;
     targetStageRef.current = targetStage;
-    modeRef.current = mode;
+    modeRef.current = "guided";
     userNameRef.current = userName;
+    setActiveScenario(picked);
 
     try {
       micStream.current = await navigator.mediaDevices.getUserMedia({
@@ -943,7 +943,21 @@ function RoleplayTrainer() {
       setReportComm(null);
       setPhase("active");
 
-      const firstName = currentScenario.prospect_name.split(" ")[0] || "Hey";
+      // Start timer
+      const durationMs = timerMinutes * 60 * 1000;
+      deadlineRef.current = Date.now() + durationMs;
+      setRemainingSeconds(Math.ceil(durationMs / 1000));
+      if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+      timerIntervalRef.current = setInterval(() => {
+        const left = Math.max(0, Math.ceil((deadlineRef.current - Date.now()) / 1000));
+        setRemainingSeconds(left);
+        if (left <= 0 && running.current && !autoEnding.current) {
+          autoEnding.current = true;
+          handleEndRoleplay();
+        }
+      }, 500);
+
+      const firstName = picked.prospect_name.split(" ")[0] || "Hey";
       const opener = `Hello? This is ${firstName}.`;
       history.current.push({ role: "assistant", content: opener });
       setMessages([{ role: "ai", message: opener }]);
@@ -1009,8 +1023,8 @@ function RoleplayTrainer() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             userName: userNameRef.current,
-            persona: currentScenario
-              ? `${currentScenario.scenario_id} — ${currentScenario.prospect_name} (${currentScenario.difficulty}) — target: Stage ${targetStageRef.current} ${STAGE_NAMES[targetStageRef.current - 1]}`
+            persona: activeScenario
+              ? `${activeScenario.scenario_id} — ${activeScenario.prospect_name} (${activeScenario.difficulty}) — target: Stage ${targetStageRef.current} ${STAGE_NAMES[targetStageRef.current - 1]}`
               : "",
             mode: modeRef.current,
             transcript: compactTranscript,
@@ -1067,47 +1081,6 @@ function RoleplayTrainer() {
             </div>
 
             <div>
-              <div className="flex items-center justify-between mb-1.5 sm:mb-2">
-                <label className="text-gray-600 text-[10px] sm:text-xs uppercase tracking-wider">Scenario</label>
-                <div className="flex gap-1">
-                  {(["All", "Easy", "Medium", "Hard"] as const).map((d) => (
-                    <button
-                      key={d}
-                      onClick={() => setDifficultyFilter(d)}
-                      className={`px-2 py-0.5 rounded text-[10px] transition-colors ${
-                        difficultyFilter === d
-                          ? "bg-gold/20 text-gold border border-gold/30"
-                          : "text-gray-400 border border-gray-200 hover:text-gray-600"
-                      }`}
-                    >
-                      {d}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <select
-                value={scenarioId}
-                onChange={(e) => setScenarioId(e.target.value)}
-                className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-gray-700 text-sm focus:outline-none focus:border-gold/50"
-              >
-                {filteredScenarios.map((s) => (
-                  <option key={s.scenario_id} value={s.scenario_id}>
-                    {s.scenario_id} · {s.difficulty} · {s.prospect_name} — {s.segment}
-                  </option>
-                ))}
-              </select>
-              {currentScenario && (
-                <div className="mt-2 bg-gray-50 border border-gray-100 rounded-lg px-3 py-2 text-xs text-gray-600 space-y-1">
-                  <p><span className="text-gray-400">Position:</span> {currentScenario.position}</p>
-                  <p><span className="text-gray-400">Book:</span> {currentScenario.working_title} — {currentScenario.book_idea}</p>
-                  <p><span className="text-gray-400">Personality:</span> {currentScenario.personality}</p>
-                  <p><span className="text-gray-400">Manuscript:</span> {currentScenario.manuscript_status}</p>
-                  <p className="text-gold/80"><span className="text-gray-400">Main objection:</span> {currentScenario.main_objection} <span className="text-gray-400">(at {currentScenario.objection_stage})</span></p>
-                </div>
-              )}
-            </div>
-
-            <div>
               <label className="text-gray-600 text-[10px] sm:text-xs uppercase tracking-wider mb-1.5 sm:mb-2 block">
                 Target Stage — practice up through
               </label>
@@ -1123,39 +1096,39 @@ function RoleplayTrainer() {
                 ))}
               </select>
               <p className="text-[10px] text-gray-400 mt-1">
-                Roleplay auto-ends once the setter completes Stage {targetStage}. Feedback covers only stages 1–{targetStage}.
+                Auto-ends when the setter completes Stage {targetStage}. Feedback covers stages 1–{targetStage}.
               </p>
             </div>
 
             <div>
-              <label className="text-gray-600 text-[10px] sm:text-xs uppercase tracking-wider mb-1.5 sm:mb-2 block">Difficulty</label>
-              <div className="grid grid-cols-3 gap-2">
-                {([
-                  { key: "training", title: "Training Wheels", desc: "Stage shown + live coaching" },
-                  { key: "guided", title: "Guided", desc: "Stage shown. No coaching." },
-                  { key: "hardcore", title: "Hardcore", desc: "No help. Real difficulty." },
-                ] as { key: Mode; title: string; desc: string }[]).map((m) => (
-                  <button
-                    key={m.key}
-                    onClick={() => setMode(m.key)}
-                    className={`p-2 sm:p-3 rounded-lg border text-left transition-colors ${
-                      mode === m.key
-                        ? "border-gold bg-gold/5"
-                        : "border-gray-200 hover:border-gray-300"
-                    }`}
-                  >
-                    <p className="text-gray-800 text-xs sm:text-sm font-medium">{m.title}</p>
-                    <p className="text-gray-400 text-[10px] mt-0.5 leading-tight">{m.desc}</p>
-                  </button>
+              <label className="text-gray-600 text-[10px] sm:text-xs uppercase tracking-wider mb-1.5 sm:mb-2 block">
+                Timer
+              </label>
+              <select
+                value={timerMinutes}
+                onChange={(e) => setTimerMinutes(parseInt(e.target.value))}
+                className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-gray-700 text-sm focus:outline-none focus:border-gold/50"
+              >
+                {TIMER_OPTIONS.map((min) => (
+                  <option key={min} value={min}>
+                    {min} minute{min === 1 ? "" : "s"}
+                  </option>
                 ))}
-              </div>
+              </select>
+              <p className="text-[10px] text-gray-400 mt-1">
+                Hard cap on the call. Ends at {timerMinutes}:00 whether or not the target stage was reached.
+              </p>
+            </div>
+
+            <div className="bg-gray-50 border border-gray-100 rounded-lg px-3 py-2 text-xs text-gray-600">
+              <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-1">Scenario</p>
+              <p>A random prospect scenario is picked when you start. You&apos;ll see the details on the final report.</p>
             </div>
           </div>
 
           <button
             onClick={handleStartRoleplay}
-            disabled={!currentScenario}
-            className="w-full bg-gold/90 hover:bg-gold disabled:bg-gray-200 disabled:cursor-not-allowed rounded-lg px-4 py-3 text-white text-sm transition-colors shadow-sm"
+            className="w-full bg-gold/90 hover:bg-gold rounded-lg px-4 py-3 text-white text-sm transition-colors shadow-sm"
           >
             Start Roleplay
           </button>
@@ -1173,8 +1146,9 @@ function RoleplayTrainer() {
 
   // ---- ACTIVE CALL PHASE ----
   if (phase === "active") {
-    const hints = MODE_HINTS[mode];
-    const currentHint = hints[Math.min(currentStage - 1, hints.length - 1)];
+    const mm = String(Math.floor(remainingSeconds / 60)).padStart(2, "0");
+    const ss = String(remainingSeconds % 60).padStart(2, "0");
+    const timerLow = remainingSeconds <= 60;
 
     return (
       <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-start px-4 py-6">
@@ -1187,15 +1161,15 @@ function RoleplayTrainer() {
               </p>
             </div>
           </div>
-        ) : mode === "training" ? (
+        ) : (
           <div className="w-full max-w-lg mb-4">
             <div className="bg-white border border-gray-100 rounded-lg p-3 shadow-sm">
               <div className="flex items-center justify-between mb-1">
                 <p className="text-gray-400 text-[10px] uppercase tracking-wider">
                   Stage {currentStage}/8 — {STAGE_NAMES[currentStage - 1]}
                 </p>
-                <p className="text-gold/70 text-[10px]">
-                  Target: Stage {targetStage}
+                <p className={`text-[10px] font-mono tabular-nums ${timerLow ? "text-red-500 font-bold" : "text-gray-500"}`}>
+                  {mm}:{ss}
                 </p>
               </div>
               <div className="flex gap-0.5">
@@ -1223,7 +1197,7 @@ function RoleplayTrainer() {
               </div>
             </div>
           </div>
-        ) : null}
+        )}
 
         <TiffanyOrb isSpeaking={isSpeaking} isConnected={true} />
 
@@ -1231,13 +1205,6 @@ function RoleplayTrainer() {
           <div className="w-full max-w-lg mt-4 bg-gold/10 border border-gold/30 rounded-lg p-3">
             <p className="text-gold text-[10px] uppercase tracking-wider mb-1">Coach</p>
             <p className="text-gray-700 text-sm">{coachTip}</p>
-          </div>
-        )}
-
-        {!coachModeActive && mode === "training" && currentHint && !coachTip && (
-          <div className="w-full max-w-lg mt-4 bg-white border border-gray-100 rounded-lg p-3 shadow-sm">
-            <p className="text-gray-400 text-[10px] uppercase tracking-wider mb-1">Prompt</p>
-            <p className="text-gray-600 text-xs leading-relaxed">{currentHint}</p>
           </div>
         )}
 
@@ -1256,7 +1223,7 @@ function RoleplayTrainer() {
           </svg>
         </button>
 
-        {(mode === "training" || coachModeActive) && (
+        {coachModeActive && (
           <div className="w-full max-w-md mt-6">
             <Transcript messages={messages} />
           </div>
@@ -1322,11 +1289,11 @@ function RoleplayTrainer() {
 
             <div className="bg-white border border-gray-100 rounded-xl p-6 shadow-sm print:shadow-none print:border-0 print:p-0">
               <h2 className="text-gray-500 text-xs uppercase tracking-wider mb-3 print:mb-2">Scenario</h2>
-              {currentScenario ? (
+              {activeScenario ? (
                 <div className="text-gray-700 text-sm space-y-1">
-                  <p><span className="text-gray-400">ID:</span> {currentScenario.scenario_id} · {currentScenario.difficulty}</p>
-                  <p><span className="text-gray-400">Prospect:</span> {currentScenario.prospect_name} — {currentScenario.position}</p>
-                  <p><span className="text-gray-400">Book:</span> {currentScenario.working_title}</p>
+                  <p><span className="text-gray-400">ID:</span> {activeScenario.scenario_id} · {activeScenario.difficulty}</p>
+                  <p><span className="text-gray-400">Prospect:</span> {activeScenario.prospect_name} — {activeScenario.position}</p>
+                  <p><span className="text-gray-400">Book:</span> {activeScenario.working_title}</p>
                   <p><span className="text-gray-400">Target stage:</span> Stage {targetStageRef.current} — {STAGE_NAMES[targetStageRef.current - 1]}</p>
                 </div>
               ) : (
