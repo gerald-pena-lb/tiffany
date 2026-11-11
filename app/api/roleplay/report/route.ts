@@ -36,7 +36,25 @@ Produce the evaluation in EXACTLY this markdown structure. Quote specific lines 
 
 ## Stage-by-Stage NEPQ Scores (0-3 each)
 
-0 — Missed · 1 — Weak · 2 — Solid · 3 — Excellent
+0 — Missed · 1 — Weak (attempted but incomplete) · 2 — Solid (hit stage's gating criteria) · 3 — Excellent (dug deeper, prospect opened up)
+
+Reference criteria for v2:
+- Stage 1 (Connecting): Real reason in own words (past "the ad"), book status, 1% frame.
+- Stage 2 (Situation): Authority slides delivered, SPECIFIC goal named, "why important?", CAPACITY question asked ("what are you doing right now to achieve that?").
+- Stage 3 (Problem): Specific day-to-day problem, how long, impact on READERS.
+- Stage 4 (Consequence): 1% reframe applied; money math for money-driven prospects OR legacy language for legacy-driven (never force dollars on a legacy buyer).
+- Stage 5 (Rationale): Why pros over DIY, "what stays unaccomplished?", "tried on your own?"
+- Stage 6 (Open Wallet): THREE GATES — (a) number, (b) "funds available NOW or does something need to happen first?", (c) "besides you, who else weighs in?". A number alone = at most 1.
+- Stage 7 (Transition/Scheduling): Must match the correct_scheduling_decision for this scenario. Scheduling a prospect whose correct move was "don't schedule" = 0, no matter how smooth the ask. Correct scheduling move + verbal day/time + invite confirm + LinkedIn = 3.
+- Stage 8 (Prep/Homework): Prep explained, 30-60 min commitment obtained, clean close.
+
+FIRM-RULE VIOLATIONS (deduct severely — mark affected stage down by at least 1):
+- Quoted delivery timelines
+- Discussed royalties / service menus / "what you get" lists
+- Mentioned AI tools of any kind
+- Gave a price beyond the ONE range line in Stage 6
+- Promised bestseller status
+- Agreed to send a written proposal before the Alinka call
 
 | Stage | Score | Justification |
 |-------|-------|---------------|
